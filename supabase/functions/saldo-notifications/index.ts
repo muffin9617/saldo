@@ -93,7 +93,7 @@ Deno.serve(async request => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const token = request.headers.get('authorization')?.replace(/^Bearer /, '');
-  let body: { action?: string };
+  let body: { action?: string; user_id?: string; device_id?: string };
   try { body = await request.json(); } catch { return respond({ error: 'Invalid request' }, 400); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return respond({ error: 'Invalid request' }, 400);
   if (body.action === 'status') {
@@ -111,6 +111,33 @@ Deno.serve(async request => {
     push_configured: Boolean(env('VAPID_PUBLIC_KEY') && env('VAPID_PRIVATE_KEY') && env('VAPID_SUBJECT')),
     vapid_public_key: env('VAPID_PUBLIC_KEY') || null,
   });
+  // An operator can test one explicitly selected device without enabling cron.
+  // This route cannot send email or accept a caller-supplied push endpoint/body.
+  if (body.action === 'test-push') {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuid.test(body.user_id || '') || !uuid.test(body.device_id || '')) return respond({ error: 'Select a user and device' }, 400);
+    if (!pushReady()) return respond({ error: 'Push is not configured' }, 503);
+    try {
+      const { data: device, error: deviceError } = await client.from('saldo_push_devices').select('*')
+        .eq('id', body.device_id).eq('user_id', body.user_id).maybeSingle();
+      if (deviceError) throw deviceError;
+      if (!device) return respond({ error: 'Device not found' }, 404);
+      const { data: preferences, error: preferencesError } = await client.from('saldo_notification_preferences')
+        .select('push_enabled').eq('user_id', body.user_id).maybeSingle();
+      if (preferencesError) throw preferencesError;
+      if (!preferences?.push_enabled) return respond({ error: 'Push is disabled' }, 409);
+      if (!pushEndpointAllowed(device.endpoint)) return respond({ error: 'Invalid push provider' }, 400);
+      await webpush.sendNotification({ endpoint: device.endpoint, keys: { p256dh: device.p256dh, auth: device.auth } },
+        JSON.stringify({ body: '后台推送测试：这条通知由 Saldo 服务器发送。收到即表示后台到设备的推送链路已连通。', tag: 'saldo-backend-test' }), {
+          vapidDetails: { subject: env('VAPID_SUBJECT'), publicKey: env('VAPID_PUBLIC_KEY'), privateKey: env('VAPID_PRIVATE_KEY') },
+          timeout: 8000, TTL: 300, urgency: 'normal', topic: 'saldo-backend-test',
+        });
+      return respond({ accepted: true, channel: 'push' });
+    } catch (error) {
+      const code = (error as { statusCode?: number }).statusCode;
+      return respond({ error: 'Test push failed', provider_status: typeof code === 'number' ? code : null }, 503);
+    }
+  }
   if (body.action !== 'dispatch') return respond({ error: 'Unauthorized' }, 401);
   if (env('SALDO_NOTIFICATIONS_SCHEDULED') !== 'true') return respond({ error: 'Scheduled delivery is disabled' }, 503);
   if (!pushReady() && !emailReady()) return respond({ error: 'Delivery is not configured' }, 503);
