@@ -23,7 +23,7 @@ function button(label, href) {
 }
 
 function shell({ preheader, category, title, introduction, content = '', cta, href, note, footer, logoUrl,
-  footerTagline = '轻松管理你的储值卡和各类订阅', signature = 'SALDO · YOUR PRIVATE WALLET' }) {
+  footerTagline = '轻松管理你的储值卡和各类订阅', signature = '' }) {
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${escape(title)} · Saldo</title>
 <style>
@@ -49,19 +49,18 @@ function shell({ preheader, category, title, introduction, content = '', cta, hr
 ${content}${gap(28)}<tr><td>${button(cta, href)}</td></tr>${gap(22)}
 <tr><td class="muted" style="font-size:12px;line-height:1.85;color:${brand.muted};overflow-wrap:anywhere">${note}</td></tr>
 </table></td></tr>${gap(26)}
-<tr><td align="center" style="padding:0 16px;color:#b9aa94;font-size:12px;line-height:1.85">${escape(footerTagline)}<br>${footer}</td></tr>${gap(10)}
-<tr><td align="center" style="font-family:${brand.display};font-size:12px;line-height:20px;color:#8e7c62;letter-spacing:1px">${escape(signature)}</td></tr>
+<tr><td align="center" style="padding:0 16px;color:#b9aa94;font-size:12px;line-height:1.85">${footerTagline ? escape(footerTagline)+'<br>' : ''}${footer}</td></tr>${signature ? gap(10)+'<tr><td align="center" style="font-family:'+brand.display+';font-size:12px;line-height:20px;color:#8e7c62;letter-spacing:1px">'+escape(signature)+'</td></tr>' : ''}
 </table><!--[if mso]></td></tr></table><![endif]-->
 </td></tr></table></body></html>`;
 }
 
-const defaultLogo = 'https://saldo.tobmarket.ing/email-logo.png';
+const defaultLogo = 'https://saldo.tobmarket.ing/email-logo.png?v=20261120';
 export function confirmationEmail({ verificationUrl = '{{ .ConfirmationURL }}', logoUrl = defaultLogo } = {}) {
   return {
     subject: '验证你的邮箱，开始使用 Saldo',
     text: '欢迎使用 Saldo\n轻松管理你的储值卡和各类订阅。\n请打开以下链接验证邮箱：\n'+verificationUrl+'\n\n如果你没有注册 Saldo，请忽略这封邮件。',
     html: shell({
-      preheader: '只差一步，开始记录你的账本。', category: '账号验证', title: '欢迎使用 Saldo',
+      preheader: '验证邮箱，开始管理储值卡和订阅。', category: '账号验证', title: '欢迎使用 Saldo',
       introduction: '轻松管理你的储值卡和各类订阅。',
       cta: '验证邮箱', href: verificationUrl, logoUrl,
       note: '如果你没有注册 Saldo，请忽略这封邮件。<br>验证链接失效时，可返回 Saldo 重新申请。',
@@ -71,11 +70,17 @@ export function confirmationEmail({ verificationUrl = '{{ .ConfirmationURL }}', 
   };
 }
 
-export function reminderEmail(subscription, offset, { appUrl = 'https://saldo.tobmarket.ing/', logoUrl = defaultLogo } = {}) {
+export function reminderEmail(subscription, offset, { appUrl = 'https://saldo.tobmarket.ing/', logoUrl = defaultLogo,
+  preferencesUrl = 'https://saldo.tobmarket.ing/notification-settings.html' } = {}) {
   const when = offset === 0 ? '今天到期' : `${offset} 天后到期`;
   const title = offset === 0 ? '你的订阅今天到期' : '你的订阅即将到期';
   const name = String(subscription.name ?? '订阅');
   const date = String(subscription.expires_on ?? '');
+  const introduction = subscription.auto_renew === true
+    ? '你已将此订阅标记为自动续约。<br>请留意续费安排，具体以服务商为准。'
+    : subscription.auto_renew === false
+      ? '如需继续使用，请提前安排续订。'
+      : '打开 Saldo，查看你记录的订阅详情。';
   const fields = [['到期日期', date]];
   if (subscription.fee_cents != null && Number.isSafeInteger(Number(subscription.fee_cents)) && Number(subscription.fee_cents) >= 0) {
     fields.push(['记录费用', '¥ '+(Number(subscription.fee_cents)/100).toLocaleString('zh-CN', { minimumFractionDigits:2, maximumFractionDigits:2 })]);
@@ -83,15 +88,15 @@ export function reminderEmail(subscription, offset, { appUrl = 'https://saldo.to
   if (typeof subscription.auto_renew === 'boolean') fields.push(['自动续约', subscription.auto_renew ? '是' : '否']);
   const details = fields.map(([label,value])=>`<tr><td class="muted" width="92" valign="top" style="padding:8px 0;font-size:13px;line-height:22px;color:${brand.muted}">${label}</td><td class="ink" align="right" valign="top" style="padding:8px 0 8px 12px;font-size:14px;line-height:22px;color:${brand.ink};overflow-wrap:anywhere;word-break:break-word">${escape(value)}</td></tr>`).join('');
   return {
-    subject: `Saldo · ${name}${when}`,
-    text: `${name} 将于 ${date} 到期（${when}）。\n${fields.map(([label,value])=>label+'：'+value).join('\n')}\n\n打开 Saldo 查看：${appUrl}\n此提醒基于你在 Saldo 中记录的信息，不代表实际扣款或续约结果。\n可在「我的 → 管理通知」关闭邮件提醒。`,
+    subject: `Saldo · ${name} · ${when}`,
+    text: `${name} 将于 ${date} 到期（${when}）。\n${introduction.replaceAll('<br>','\n')}\n${fields.map(([label,value])=>label+'：'+value).join('\n')}\n\n打开 Saldo 查看：${appUrl}\n此提醒基于你在 Saldo 中记录的信息，不代表实际扣款或续约结果。\n管理或关闭提醒：${preferencesUrl}`,
     html: shell({
       preheader: `${name} · ${date} 到期，提前安排更从容。`, category: '订阅到期提醒', title,
-      introduction: '这是你在 Saldo 中设置的到期提醒。<br>你可以查看订阅，按自己的需要安排续订。',
-      content: `${gap(24)}<tr><td class="data-panel" bgcolor="#f1e8d8" style="padding:22px 20px;background-color:#f1e8d8;border:1px solid ${brand.line};border-radius:12px"><table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="table-layout:fixed"><tr><td class="accent" style="font-family:${brand.font};font-size:12px;line-height:22px;color:#8c632a">${escape(when)}</td></tr>${gap(8)}<tr><td class="ink" style="font-size:22px;line-height:1.5;font-weight:500;color:${brand.ink};overflow-wrap:anywhere;word-break:break-word">${escape(name)}</td></tr>${gap(16)}<tr><td class="rule" style="border-top:1px solid ${brand.line};padding-top:10px"><table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="table-layout:fixed">${details}</table></td></tr></table></td></tr>`,
+      introduction,
+      content: `${gap(24)}<tr><td><table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="border-collapse:separate;table-layout:fixed"><tr><td class="data-panel" bgcolor="#f1e8d8" style="padding:22px 20px;background-color:#f1e8d8;border:1px solid ${brand.line};border-radius:12px"><table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="table-layout:fixed"><tr><td class="accent" style="font-family:${brand.font};font-size:12px;line-height:22px;color:#8c632a">${escape(when)}</td></tr>${gap(8)}<tr><td class="ink" style="font-size:22px;line-height:1.5;font-weight:500;color:${brand.ink};overflow-wrap:anywhere;word-break:break-word">${escape(name)}</td></tr>${gap(16)}<tr><td class="rule" style="border-top:1px solid ${brand.line};padding-top:10px"><table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="table-layout:fixed">${details}</table></td></tr></table></td></tr></table></td></tr>`,
       cta: '打开 Saldo', href: appUrl, logoUrl,
       note: '此提醒基于你在 Saldo 中记录的信息，不代表实际扣款或续约结果。',
-      footer: '你已在 Saldo 开启邮件提醒。<br><a class="email-link" href="'+safeUrl(appUrl)+'" target="_blank" style="color:#e3c28b;text-decoration:underline">在「我的 → 管理通知」调整或关闭提醒</a>',
+      footer: '<a class="email-link" href="'+safeUrl(preferencesUrl)+'" target="_blank" style="color:#e3c28b;text-decoration:underline">管理通知偏好</a>',
     }),
   };
 }

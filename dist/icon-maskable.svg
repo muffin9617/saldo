@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-labelledby="brand-title">
+  <title id="brand-title">Saldo</title>
+  <defs>
+    <radialGradient id="lacquer" cx=".21" cy=".03" r="1.15">
+      <stop stop-color="#55412b"/>
+      <stop offset=".52" stop-color="#241c16"/>
+      <stop offset="1" stop-color="#120f0e"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#c8a778" stop-opacity=".68"/>
+      <stop offset=".46" stop-color="#806746" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#d4a574" stop-opacity=".44"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#fff0c5"/>
+      <stop offset=".32" stop-color="#e7c28c"/>
+      <stop offset=".65" stop-color="#b37744"/>
+      <stop offset="1" stop-color="#f0ce96"/>
+    </linearGradient>
+    <linearGradient id="orbit" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f5d5a2" stop-opacity=".05"/>
+      <stop offset=".51" stop-color="#e4ac6b" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#d09356" stop-opacity=".13"/>
+    </linearGradient>
+  </defs>
+  <path fill="#181311" d="M0 0h192v192H0z"/>
+  <rect width="192" height="192" fill="url(#lacquer)"/>
+  <circle cx="96" cy="96" r="64.5" fill="none" stroke="url(#orbit)"/>
+  <path fill="none" stroke="#d4ae79" stroke-opacity=".3" stroke-linecap="round" d="M50 141a64.5 64.5 0 0 0 91 0"/>
+  <text x="96" y="147" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="140" font-weight="400" fill="#090705" opacity=".65" transform="translate(0 1.5)">S</text>
+  <text x="96" y="147" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="140" font-weight="400" fill="url(#gold)">S</text>
+  <circle cx="145" cy="56" r="2.1" fill="#f7d8a6"/>
+</svg>

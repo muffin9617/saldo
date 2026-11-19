@@ -7,8 +7,8 @@ self.addEventListener('push', event => {
   }
   event.waitUntil(self.registration.showNotification('Saldo · 到期提醒', {
     body: typeof payload?.body === 'string' ? payload.body : '你有一项订阅即将到期，打开 Saldo 查看。',
-    icon: './icon-192.png',
-    badge: './icon-192.png',
+    icon: './icon-192.png?v=20261120',
+    badge: './notification-badge.png?v=20261120',
     tag: typeof payload?.tag === 'string' ? payload.tag : 'saldo-expiry',
     data: { url: self.registration.scope },
   }));
