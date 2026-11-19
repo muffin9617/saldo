@@ -31,6 +31,7 @@ const { stripTypeScriptTypes } = require('node:module');
   const tables={saldo_subscriptions:[sub],saldo_notification_preferences:[prefs],saldo_push_devices:[device]};
   const leases=new Map();
   let sentEmails=0,sentPush=0,handler;
+  const pushOptions=[];
   function from(table) {
     const filters=[];
     let change;
@@ -68,7 +69,7 @@ const { stripTypeScriptTypes } = require('node:module');
   const source=stripTypeScriptTypes(fs.readFileSync('supabase/functions/saldo-notifications/index.ts','utf8')
     .replace(/^import .*;$/gm,''),{mode:'strip'});
   new Function('createClient','webpush','pushEndpointAllowed','reminderOffset','reminderText','reminderEmail','Deno','fetch',source)(
-    ()=>client,{sendNotification:async()=>{sentPush++}},
+    ()=>client,{sendNotification:async(subscription,payload,options)=>{sentPush++;pushOptions.push(options);return {statusCode:201}}},
     reminders.pushEndpointAllowed,reminders.reminderOffset,reminders.reminderText,
     reminderEmail,
     {env:{get:name=>settings[name]},serve:fn=>{handler=fn}},
@@ -101,7 +102,9 @@ const { stripTypeScriptTypes } = require('node:module');
   assert.equal((await invoke(testPush,'cron-test')).status,409);
   prefs.push_enabled=true;
   const pushBefore=sentPush,emailBefore=sentEmails;
-  assert.deepEqual(await (await invoke(testPush,'cron-test')).json(),{accepted:true,channel:'push'});
+  assert.deepEqual(await (await invoke(testPush,'cron-test')).json(),{accepted:true,channel:'push',provider_status:201});
+  assert.equal(pushOptions[0].urgency,'normal');
+  assert.equal(pushOptions.at(-1).urgency,'high');
   assert.equal(sentPush,pushBefore+1);assert.equal(sentEmails,emailBefore);
   assert.equal((await invoke('dispatch','cron-test')).status,503);
   tables.saldo_push_devices=[];

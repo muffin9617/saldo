@@ -13,3 +13,5 @@
 本地验证：在仓库根目录使用支持 `stripTypeScriptTypes` 的 Node 运行 `node tests/notification-delivery.cjs`。测试采用内存数据和模拟推送/发信服务，无外部发送。覆盖调度鉴权、开关、重复抑制、全部关闭，以及测试推送的管理员权限、设备归属与用户偏好检查。
 
 2026-11-19：用户确认系统通知显示测试成功后，部署函数 version 11 并向已登记设备发送一次后台测试。提供商接受（HTTP 200，accepted=true），用户反馈暂未收到，设备送达尚未通过，继续排查实际登记设备及浏览器接收情况。每日 cron 保持 inactive，自动发送开关关闭。
+
+复测准备：测试推送使用 high urgency，普通订阅提醒仍为 normal。响应保留提供商 HTTP 状态；它仍不能作为设备送达证据。用户已确认 Android Chrome、Google Play 服务已启用；将保持亮屏前台做一次复测。

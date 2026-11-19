@@ -127,12 +127,12 @@ Deno.serve(async request => {
       if (preferencesError) throw preferencesError;
       if (!preferences?.push_enabled) return respond({ error: 'Push is disabled' }, 409);
       if (!pushEndpointAllowed(device.endpoint)) return respond({ error: 'Invalid push provider' }, 400);
-      await webpush.sendNotification({ endpoint: device.endpoint, keys: { p256dh: device.p256dh, auth: device.auth } },
+      const result = await webpush.sendNotification({ endpoint: device.endpoint, keys: { p256dh: device.p256dh, auth: device.auth } },
         JSON.stringify({ body: '后台推送测试：这条通知由 Saldo 服务器发送。收到即表示后台到设备的推送链路已连通。', tag: 'saldo-backend-test' }), {
           vapidDetails: { subject: env('VAPID_SUBJECT'), publicKey: env('VAPID_PUBLIC_KEY'), privateKey: env('VAPID_PRIVATE_KEY') },
-          timeout: 8000, TTL: 300, urgency: 'normal', topic: 'saldo-backend-test',
+          timeout: 8000, TTL: 300, urgency: 'high', topic: 'saldo-backend-test',
         });
-      return respond({ accepted: true, channel: 'push' });
+      return respond({ accepted: true, channel: 'push', provider_status: result.statusCode });
     } catch (error) {
       const code = (error as { statusCode?: number }).statusCode;
       return respond({ error: 'Test push failed', provider_status: typeof code === 'number' ? code : null }, 503);
