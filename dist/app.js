@@ -24,6 +24,7 @@ html+='<div class="info"><span>备注</span><input class="inline" data-field="no
 }else if(page==='总览'){html+='<div class="wallet"><div class="muted">最近记录余额 · CNY</div><div class="balance"><span class="money-symbol">¥</span>'+money(active('cards').reduce((a,x)=>a+Math.round((x.balance||0)*100),0)/100)+'</div></div><div class="metrics"><button data-page="储值卡">'+svg('card')+' '+active('cards').length+' 张储值卡</button><button data-page="订阅">'+svg('calendar')+' '+active('subs').length+' 个订阅</button></div><div class="section"><h3>近期到期</h3><span class="muted">未来 30 天</span></div>';let soon=active('subs').filter(x=>x.date&&days(x.date)>=0&&days(x.date)<=30).sort((a,b)=>a.date.localeCompare(b.date));html+=soon.length?soon.map(notice).join(''):'<div class="empty">暂无近期到期事项</div>';html+='<div class="section"><h3>我的储值卡</h3><button data-page="储值卡">查看全部 →</button></div>'+rows('cards',active('cards').slice(0,4));
 }else if(page==='我的'){
   html += '<div class="wallet"><h2 class="account-title">你的私人钱包</h2><p class="muted">'+esc(currentSession.user.email)+'</p></div>' +
+    '<button class="secondary" data-action="notification-test">通知连接测试</button>' +
     '<button class="secondary" data-action="export">导出当前数据</button>' +
     '<button class="secondary" data-action="archives">已移出的记录</button>' +
     '<button class="secondary" data-action="sign-out">退出登录</button>';
@@ -244,6 +245,9 @@ document.addEventListener('click', async event => {
         : '<p class="muted">暂无已移出的记录。</p>'));
       break;
     }
+    case 'notification-test':
+      location.assign('/notification-test.html');
+      break;
     case 'export':
       exportWallet();
       break;
