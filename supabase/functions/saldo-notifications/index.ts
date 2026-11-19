@@ -18,7 +18,8 @@ const emailReady = () => Boolean(env('RESEND_API_KEY') && env('SALDO_FROM_EMAIL'
 async function allRows(client: SupabaseClient, table: string, configure = (query: any) => query) {
   const rows: any[] = [];
   for (let start = 0; ; start += 500) {
-    const { data, error } = await configure(client.from(table).select('*')).order('id').range(start, start + 499);
+    const key = table === 'saldo_notification_preferences' ? 'user_id' : 'id';
+    const { data, error } = await configure(client.from(table).select('*')).order(key).range(start, start + 499);
     if (error) throw error;
     rows.push(...data);
     if (data.length < 500) return rows;

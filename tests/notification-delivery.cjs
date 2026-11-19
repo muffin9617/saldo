@@ -11,6 +11,20 @@ const { stripTypeScriptTypes } = require('node:module');
   assert.equal(reminders.reminderOffset({...sub,reminder_days:[]},prefs,new Date('2026-11-18T10:00Z')),null);
   assert.equal(reminders.reminderOffset({...sub,archived_at:'now'},prefs,new Date('2026-11-18T10:00Z')),null);
   assert.equal(reminders.reminderOffset({...sub,expires_on:'2026-11-18'}, {...prefs,time_zone:'America/Los_Angeles'},new Date('2026-11-18T01:00Z')),1);
+  const checkAt = new Date('2026-11-19T01:00:00Z');
+  for (const day of [0,1,3,7,14,30]) {
+    const date = new Date('2026-11-19T00:00:00Z');
+    date.setUTCDate(date.getUTCDate()+day);
+    assert.equal(reminders.reminderOffset({...sub,expires_on:date.toISOString().slice(0,10),reminder_days:[day]},prefs,checkAt),day);
+  }
+  assert.equal(reminders.reminderOffset({...sub,expires_on:'2026-11-22'},prefs,checkAt),3);
+  assert.equal(reminders.reminderOffset({...sub,expires_on:'2026-12-19',cycle_months:12},prefs,checkAt),30);
+  assert.equal(reminders.reminderOffset({...sub,expires_on:'2026-11-26',cycle_months:3},prefs,checkAt),7);
+  assert.equal(reminders.reminderOffset({...sub,expires_on:'2026-11-21'},prefs,checkAt),null);
+  assert.equal(reminders.reminderOffset({...sub,expires_on:null},prefs,checkAt),null);
+  assert.equal(reminders.reminderOffset({...sub,expires_on:'2026-11-18'},prefs,checkAt),null);
+  assert.equal(reminders.reminderOffset({...sub,expires_on:'2026-11-20'},prefs,new Date('2026-11-19T15:59:59Z')),1);
+  assert.equal(reminders.reminderOffset({...sub,expires_on:'2026-11-20'},prefs,new Date('2026-11-19T16:00:00Z')),null);
   assert.ok(reminders.pushEndpointAllowed('https://web.push.apple.com/push'));
   assert.equal(reminders.pushEndpointAllowed('https://webXpushXappleXcom/push'),false);
   assert.equal(reminders.pushEndpointAllowed('https://127.0.0.1/push'),false);
@@ -37,7 +51,7 @@ const { stripTypeScriptTypes } = require('node:module');
     let change;
     const query={
       select:()=>query,
-      order:()=>query,
+      order:key=>{assert.equal(key,table==='saldo_notification_preferences'?'user_id':'id');return query},
       is:()=>query,
       not:()=>query,
       or:()=>query,
