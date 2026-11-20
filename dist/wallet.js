@@ -36,6 +36,7 @@ function record(kind, row, history = []) {
     ...common,
     cycle,
     fee: row.fee_cents === null ? null : row.fee_cents / 100,
+    autoRenew: row.auto_renew ?? null,
     reminderDays: row.reminder_days,
   };
 }
@@ -83,6 +84,7 @@ const columns = {
   note: ['note', value => value],
   archived: ['archived_at', value => value ? new Date().toISOString() : null],
   reminderDays: ['reminder_days', value => value],
+  autoRenew: ['auto_renew', value => value],
 };
 
 export async function saveRecord(client, user, kind, previous, changes, id = previous?.id) {
@@ -95,5 +97,13 @@ export async function saveRecord(client, user, kind, previous, changes, id = pre
     ? table.update(fields).eq('user_id', user).eq('id', id).eq('version', previous.version)
     : table.insert({ ...fields, id, user_id: user });
   const { data, error } = await query.select('id').maybeSingle();
+  if (error || !data) throw error ?? new Error('STALE_RECORD');
+}
+
+export async function deleteRecord(client, user, kind, previous) {
+  if (!previous?.archived || !tables[kind]) throw new Error('STALE_RECORD');
+  const { data, error } = await client.from(tables[kind]).delete()
+    .eq('user_id', user).eq('id', previous.id).eq('version', previous.version)
+    .select('id').maybeSingle();
   if (error || !data) throw error ?? new Error('STALE_RECORD');
 }
