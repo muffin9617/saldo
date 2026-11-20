@@ -1,3 +1,4 @@
+import { installSwipeNavigation, confirmDiscardChanges } from './gestures.js';
 import { settingsHeader } from './settings-ui.js';
 const preview = ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
 const $ = id => document.getElementById(id);
@@ -64,6 +65,7 @@ async function init() {
 $('push').onchange = controls;
 $('settings').onsubmit = async event => {
   event.preventDefault(); if (busy || !user) return;
+  if(!navigator.onLine){$('result').textContent='当前离线，尚未保存。请联网后重试。';return;}
   const changes = {push_enabled:$('push').checked,email_enabled:$('email').checked};
   busy = true; controls(); $('save').textContent = '正在保存…'; $('result').textContent = '';
   try {
@@ -94,3 +96,24 @@ $('connect').onclick = async () => {
   finally { busy = false; $('connect').textContent = '开启此设备推送'; controls(); }
 };
 void init();
+
+const hasUnsavedPreferences = () => preferences && ($('push').checked !== preferences.push_enabled || $('email').checked !== preferences.email_enabled);
+const backLink = document.querySelector('.settings-back');
+const fromApp=Boolean(history.state?.saldoNotification?.fromApp || sessionStorage.getItem('saldo.notificationFromApp')==='true');sessionStorage.removeItem('saldo.notificationFromApp');
+let pendingBack=false,allowBack=false,internalBack=false;
+if(!history.state?.saldoNotification){history.replaceState({saldoNotification:{phase:'base',fromApp}},'',location.href);history.pushState({saldoNotification:{phase:'active',fromApp}},'',location.href);}
+else if(history.state.saldoNotification.phase==='base')history.pushState({saldoNotification:{phase:'active',fromApp}},'',location.href);
+const discardPreferences=()=>{if(preferences){$('push').checked=preferences.push_enabled;$('email').checked=preferences.email_enabled;}};
+window.addEventListener('popstate',event=>{
+  const state=event.state?.saldoNotification;if(!state)return;
+  if(state.phase==='base'){
+    if(allowBack || (!busy&&!hasUnsavedPreferences())){allowBack=false;if(internalBack&&!fromApp)location.replace(backLink.href);else history.back();return;}
+    pendingBack=true;history.forward();return;
+  }
+  if(pendingBack){pendingBack=false;if(busy){$('result').textContent='正在处理，请稍候。';return;}
+    confirmDiscardChanges(()=>{discardPreferences();allowBack=true;history.back();},{onStay:()=>{internalBack=false;}});
+  }
+});
+backLink.addEventListener('click',event=>{event.preventDefault();if(busy){$('result').textContent='正在处理，请稍候。';return;}internalBack=true;history.back();});
+installSwipeNavigation({canStart:()=>!busy && !document.querySelector('[data-discard-dialog]'),onLeft:()=>{backLink.click();return true;}});
+window.addEventListener('beforeunload',event=>{if(hasUnsavedPreferences()){event.preventDefault();event.returnValue='';}});

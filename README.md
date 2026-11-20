@@ -23,3 +23,5 @@ Supabase 提供邮箱密码、Google 账号验证和个人数据存储。统一�
 - 每日提醒使用既有 Cron，香港时间每日 09:00 检查一次。配置说明见 [通知运维](supabase/ops/notifications.md)。
 - 本地检查：`node tests/unified-account.cjs`、`node tests/notification-delivery.cjs`。数据库测试需要 PGlite，通过 `SALDO_PGLITE_MODULE` 指定模块路径后执行 `node tests/account-database.cjs`。
 - 发布范围与验收见 [2026-11-20 发布记录](docs/release-20261120.md)。
+
+本轮交互约定见 [交互规范](docs/interaction-guidelines.md)，导航回归测试为 `node tests/navigation.cjs`。当前草稿仅保留在页面内存，离线不自动同步。

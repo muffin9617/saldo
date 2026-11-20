@@ -1,3 +1,5 @@
+import { createHistoryNavigation } from './navigation.js';
+import { installSwipeNavigation, confirmDiscardChanges } from './gestures.js';
 import { client, callbackUrl, completeAuthCallback, continueWithPassword, hasAcceptedTerms, acceptTerms, rememberGoogleConsent, completeGoogleConsent } from './auth.js';
 import { money, moneyFromCents, nameInitial, recordFieldError, totalBalanceCents } from './presentation.js';
 import { cycles, deleteRecord, emptyWallet, loadWallet, localDate, saveRecord } from './wallet.js';
@@ -9,6 +11,9 @@ import {
 let currentSession = null;
 let ready = false;
 let writing = false;
+let editDraft = null, detailError = '', detailFieldErrors = {};
+let navReady=false, modalLayer=0, modalSequence=0;
+const tabStates={}, modalCache=new Map();
 let myView = '', myScroll = 0, notificationSummary = '查看接收方式', summaryOwner = null, summaryLoading = false;
 const icons={home:'<path d="m3 10 9-7 9 7v10H3Z"/><path d="M9 20v-7h6v7"/>',card:'<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20M6 15h4"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 2v6M17 2v6M3 11h18"/>',user:'<circle cx="12" cy="7" r="4"/><path d="M4 22v-3a8 8 0 0 1 16 0v3"/>'};
 Object.assign(icons, {
@@ -19,8 +24,25 @@ Object.assign(icons, {
 const svg=k=>'<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+icons[k]+'</svg>';
 let data = emptyWallet();
 let page='总览',selected=null,type='cards',query='',sort='default';const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const days=d=>Math.round((Date.parse(d+'T00:00:00Z')-Date.parse(localDate()+'T00:00:00Z'))/86400000);const status=d=>!d?'日期待补充':days(d)<0?'已到期日，待确认':days(d)===0?'今天到期':'还有 '+days(d)+' 天';const active=k=>data[k].filter(x=>!x.archived);const get=()=>data[type].find(x=>x.id===selected);
-function toast(t){document.querySelector('.toast')?.remove();const n=document.createElement('div');n.className='toast';n.textContent=t;document.body.append(n);setTimeout(()=>n.remove(),2600)}
+const days=d=>Math.round((Date.parse(d+'T00:00:00Z')-Date.parse(localDate()+'T00:00:00Z'))/86400000);const status=d=>!d?'日期待补充':days(d)<0?'已到期日，待确认':days(d)===0?'今天到期':'还有 '+days(d)+' 天';const active=k=>data[k].filter(x=>!x.archived);const get=()=>editDraft?.isNew && editDraft.base.id===selected ? editDraft.base : data[type].find(x=>x.id===selected);
+let toastTimer;
+function dismissToast(){clearTimeout(toastTimer);document.querySelector('.toast')?.remove();}
+function toast(message,{action,label='撤销',duration=4200}={}){
+  dismissToast();
+  const node=document.createElement('div');node.className='toast';
+  const statusNode=document.createElement('span');statusNode.setAttribute('role','status');statusNode.textContent=message;node.append(statusNode);
+  if(action){const button=document.createElement('button');button.type='button';button.textContent=label;button.onclick=async()=>{button.disabled=true;clearTimeout(toastTimer);await action();if(node.isConnected)node.remove();};node.append(button);}
+  document.body.append(node);toastTimer=setTimeout(()=>node.remove(),action?10000:duration);
+}
+function connectivityMessage(){return navigator.onLine?'':'当前离线。输入会保留在此页面，联网后可重试保存。';}
+function updateConnectivity(){
+  let node=$('connectivity-status');
+  if(!node){node=document.createElement('p');node.id='connectivity-status';node.className='connectivity-status';node.setAttribute('role','status');$('app').before(node);}
+  node.textContent=connectivityMessage();node.hidden=navigator.onLine;
+}
+window.addEventListener('online',updateConnectivity);window.addEventListener('offline',updateConnectivity);
+updateConnectivity();
+
 function logo(entry) {
   return '<span class="logo" aria-hidden="true">'+esc(nameInitial(entry.name))+'</span>';
 }
@@ -96,29 +118,30 @@ function render() {
   if (!ready) return;
   if (selected && !get()) selected = null;
   const settingsView = page === '我的' && myView && !selected;
-  let html = settingsView ? settingsHeader(myView === 'archives' ? '已移除记录' : '关于 Saldo',{backAction:'my-back'})+'<main class="wallet-main settings-main">' : '<header'+(selected ? ' class="detail-header"' : '')+'>'+brand('data-page="总览"')+
-    (selected ? '<h2>'+(type === 'cards' ? '储值卡详情' : '订阅详情')+'</h2><button class="detail-back" data-action="back">‹ 返回</button>'
-      : page === '我的' ? '<span class="my-heading">我的</span>' : '<button class="round" data-action="add" aria-label="添加记录">'+svg('add')+'</button>')+'</header><main class="wallet-main">';
+  let html = settingsView ? settingsHeader(myView === 'archives' ? '已移除记录' : '关于 Saldo',{backAction:'my-back'})+'<main class="wallet-main settings-main">'
+    : selected ? '<header class="detail-header">'+brand('data-page="总览"')+'<h2>'+(editDraft?.isNew?(type==='cards'?'添加储值卡':'添加订阅'):(type==='cards'?'储值卡详情':'订阅详情'))+'</h2><button class="detail-back" data-action="back" aria-label="返回上一页">‹ 返回</button></header><main class="wallet-main record-detail'+(editDraft?' is-editing':'')+'" '+(writing?'aria-busy="true"':'')+'>'+(detailError?'<p id="detail-error" class="detail-error error" role="alert">'+esc(detailError)+'</p>':'')
+    : '<header>'+brand('data-page="总览"')+(page === '我的' ? '<span class="my-heading">我的</span>' : '<button class="round" data-action="add" aria-label="添加记录">'+svg('add')+'</button>')+'</header><main class="wallet-main">';
   if (selected) {
     const entry = get();
-    html += '<div class="detail-head">'+logo(entry)+'<input class="inline title-input" data-field="name" aria-label="名称" value="'+esc(entry.name)+'"></div>';
+    if(editDraft?.isNew)html+='<div class="seg" role="group" aria-label="记录类型">'+['cards','subs'].map(kind=>'<button type="button" data-type="'+kind+'" aria-pressed="'+(type===kind)+'" class="'+(type===kind?'active':'')+'">'+(kind==='cards'?'储值卡':'订阅')+'</button>').join('')+'</div>';
+    html += '<div class="detail-head">'+(editDraft?.isNew?'<span class="logo" aria-hidden="true">'+svg(type==='cards'?'card':'calendar')+'</span>':logo(entry))+'<input class="inline title-input" data-field="name" aria-label="名称" value="'+esc(entry.name)+'">'+(editDraft?'':'<button class="record-edit-trigger" data-action="edit-detail" type="button">编辑</button>')+'</div>';
     if (type === 'cards') {
-      html += '<div class="hero"><div class="muted">最近记录余额</div><div class="balance inline-money"><span class="money-symbol">¥</span>'+
+      html += '<div class="hero"><div class="muted">'+(editDraft?.isNew?'余额（选填）':'最近记录余额')+'</div><div class="balance inline-money"><span class="money-symbol">¥</span>'+
         '<input class="inline balance-input" data-field="balance" aria-label="余额" type="number" min="0" max="90000000000" step="0.01" placeholder="待更新" value="'+esc(entry.balance)+'">'+
-        '</div><div class="muted">'+esc(entry.updated || '')+' 更新</div></div>';
+        '</div>'+(editDraft?.isNew?'':'<div class="muted">'+esc(entry.updated || '')+' 更新</div>')+'</div>';
       html += '<div class="info"><span>有效期</span><input class="inline" data-field="date" aria-label="有效期" type="date" value="'+esc(entry.date)+'"></div>';
     } else {
       html += '<div class="hero"><label class="muted" for="detail-date">到期日</label><div class="date-wrap"><input id="detail-date" class="date-native" data-field="date" aria-label="到期日" type="date" value="'+esc(entry.date)+'"></div>'+
-        '<div class="pill detail-status">'+status(entry.date)+'</div></div>'+
+        '<div class="pill detail-status">'+status(editDraft?editDraft.raw.date:entry.date)+'</div></div>'+
         '<div class="info"><span>订阅周期</span><select class="inline" data-field="cycle" aria-label="订阅周期">'+[...cycles.keys()].map(cycle =>
-          '<option value="'+cycle+'"'+(entry.cycle === cycle ? ' selected' : '')+'>'+cycle+'</option>').join('')+'</select></div>'+
+          '<option value="'+cycle+'"'+(entry.cycle === cycle ? ' selected' : '')+'>'+(cycle||'未填写')+'</option>').join('')+'</select></div>'+
         '<div class="info"><span>费用（元）</span><input class="inline" data-field="fee" aria-label="费用" type="number" min="0" max="90000000000" step="0.01" value="'+esc(entry.fee)+'"></div>'+
         '<div class="info"><span>自动续约</span><select class="inline" data-field="autoRenew" aria-label="自动续约">'+renewalOptions(entry.autoRenew)+'</select></div>'+
-        '<button class="info info-button" data-action="reminder"><span>到期提醒</span><span>'+esc(entry.reminderDays?.length === 0 ? '已关闭' : formatReminders(entry.reminderDays ?? defaults(entry.cycle)))+' ›</span></button>';
+        '<'+(editDraft?'button':'div')+' class="info info-button"'+(editDraft?' type="button" data-action="reminder"':'')+'><span>到期提醒</span><span class="reminder-value"><span class="reminder-copy">'+reminderSummary(editDraft ? editDraft.reminderDays : entry.reminderDays, editDraft ? editDraft.raw.cycle : entry.cycle)+'</span>'+(editDraft?'<span class="detail-chevron" aria-hidden="true">›</span>':'')+'</span></'+(editDraft?'button':'div')+'>' ;
     }
     html += '<div class="info note-info"><span>备注</span><textarea class="inline" data-field="note" aria-label="备注" rows="3" placeholder="未填写">'+esc(entry.note)+'</textarea></div>'+
-      '<div class="actions"><button class="secondary" data-action="archive">'+(entry.archived ? '重新显示在列表' : '移出当前列表')+'</button>'+
-      '<p class="muted">'+(entry.archived ? '重新显示后，将计入当前概况。' : '保留记录，可在「我的 → 已移除记录」中找回。')+'</p></div>';
+      (editDraft ? '' : '<div class="actions"><button class="secondary" data-action="archive">'+(entry.archived ? '重新显示在列表' : '移出当前列表')+'</button>'+
+      '<p class="muted">'+(entry.archived ? '重新显示后，将计入当前概况。' : '保留记录，可在「我的 → 已移除记录」中找回。')+'</p></div>');
     if (entry.history?.length) {
       html += '<div class="section"><h3>更新历史</h3></div><div class="rows">'+entry.history.slice().reverse().map(item =>
         '<div class="history-row"><span class="muted">'+esc(localDate(new Date(item.recorded_at)))+'</span><span class="amount">'+amountMarkup(moneyFromCents(item.cents))+'</span></div>'
@@ -175,6 +198,7 @@ function render() {
   }
   $('app').innerHTML = html+'</main><p id="sync-status" class="sync-status" role="status">'+esc(syncMessage)+'</p>';
   updateNavigation();
+  updateDetailActions();
   decorateFields();
   observeLayout();
   if (page === '我的' && !myView && !selected) void updateMyNotificationSummary();
@@ -191,33 +215,63 @@ function render() {
 const tabs = ['总览', '储值卡', '订阅', '我的'];
 let detailScroll = 0;
 
-function showPage(next, direction = 0) {
-  page = next;
-  myView = '';
-  const url = new URL(location.href); url.searchParams.delete('view'); url.searchParams.delete('section');
-  history.replaceState(null,'',url);
-  selected = null;
-  query = '';
-  sort = 'default';
-  render();
-  window.scrollTo(0, 0);
-  if (direction) $('app').querySelector('main').dataset.enterFrom = direction > 0 ? 'right' : 'left';
+function appRoute(){return {page,selected,type,myView,creating:Boolean(editDraft?.isNew),modal:modalLayer};}
+function routeBase(route){return {...route,selected:null,creating:false,myView:'',modal:0};}
+function rememberTab(){if(!selected&&!myView)tabStates[page]={query,sort,scroll:window.scrollY};}
+function routeChangesRecord(from,to){return from.selected!==to.selected || from.type!==to.type || from.creating!==to.creating;}
+function needsRouteGuard(from,to){return writing || (from.modal!==to.modal && dialog.open && dialog.dataset.dirty==='true') || (routeChangesRecord(from,to)&&detailIsDirty());}
+function confirmRouteLeave(from,to){
+  if(writing){toast('正在保存，请稍候。');return Promise.resolve(false);}
+  if(!needsRouteGuard(from,to))return Promise.resolve(true);
+  if(document.querySelector('[data-discard-dialog]'))return Promise.resolve(false);
+  return new Promise(resolve=>confirmDiscardChanges(()=>{delete dialog.dataset.dirty;const cached=modalCache.get(from.modal);if(cached)cached.invalid=true;resolve(true);},{onStay:()=>resolve(false)}));
 }
-
-const isLocalPreview = () => ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
-function rememberMyReturn() {
-  try { sessionStorage.setItem('saldo.myReturn',JSON.stringify({user:currentSession.user.id,scroll:myView?myScroll:window.scrollY})); } catch {}
+function applyRoute(next,previous){
+  if(!ready)return;
+  rememberTab();
+  const previousModal=modalCache.get(previous?.modal);
+  const onlyLayer=previous && !routeChangesRecord(previous,next) && previous.page===next.page && previous.myView===next.myView;
+  if(dialog.open && next.modal!==modalLayer)finishModalClose(false);
+  if(onlyLayer && next.modal!==previous.modal){
+    modalLayer=next.modal||0;
+    if(modalLayer){const cached=modalCache.get(modalLayer);if(cached&&!cached.invalid){delete dialog.dataset.dirty;dialog.replaceChildren(...cached.nodes);dialog.classList.toggle('bottom-sheet',cached.sheet);dialog.showModal();focusModal();}else{modalLayer=0;navigationHistory.replace(appRoute());}}
+    else restoreModalFocus(previousModal);
+    return;
+  }
+  if(!onlyLayer)clearDetailDraft();
+  page=next.page;type=next.type||'cards';selected=next.selected||null;myView=next.myView||'';modalLayer=0;
+  const state=tabStates[page]||{};query=state.query||'';sort=state.sort||'default';
+  if(next.creating)createRecordDraft(type,next.selected);
+  if(selected&&!get()){selected=null;toast('这条记录暂不可用，已返回列表。');navigationHistory.replace(appRoute());}
+  render();window.scrollTo(0,selected||myView?0:state.scroll||0);
+  const previousRow=previous?.selected?$('app').querySelector('[data-open="'+previous.type+':'+previous.selected+'"]'):null;
+  const focusTarget=previousRow || (selected?$('app').querySelector('.detail-head'):myView?$('app').querySelector('header h1'):$('app').querySelector('main h2,main h3,main'));
+  if(focusTarget&&!focusTarget.matches('button,a,input,select,textarea'))focusTarget.setAttribute('tabindex','-1');focusTarget?.focus({preventScroll:true});
 }
-function openMyView(view) {
-  if (!myView) { myScroll = window.scrollY; rememberMyReturn(); }
-  myView = view; page = '我的'; selected = null;
-  const url = new URL(location.href); url.searchParams.set('view','me'); url.searchParams.set('section',view); history.replaceState(null,'',url);
-  render(); window.scrollTo(0,0);
+const navigationHistory=createHistoryNavigation({apply:applyRoute,needsGuard:needsRouteGuard,confirmLeave:confirmRouteLeave});
+async function navigate(next,{replace=false}={}){
+  const previous=appRoute();
+  if(needsRouteGuard(previous,next)&&!await confirmRouteLeave(previous,next))return;
+  rememberTab();navigationHistory[replace?'replace':'push'](next);applyRoute(next,previous);
 }
-function backToMy() {
-  myView = ''; selected = null; page = '我的';
-  const url = new URL(location.href); url.searchParams.delete('section'); history.replaceState(null,'',url);
-  render(); window.scrollTo(0,myScroll);
+function showPage(next,direction=0){
+  if(next===page&&!selected&&!myView)return;
+  void navigate({page:next,type:next==='订阅'?'subs':'cards',selected:null,myView:'',creating:false,modal:0}).then(()=>{if(direction)$('app').querySelector('main').dataset.enterFrom=direction>0?'right':'left';});
+}
+const isLocalPreview=()=>['localhost','127.0.0.1','[::1]'].includes(location.hostname);
+function rememberMyReturn(){try{sessionStorage.setItem('saldo.myReturn',JSON.stringify({user:currentSession.user.id,scroll:myView?myScroll:window.scrollY}));}catch{}}
+function openMyView(view){if(!myView){myScroll=window.scrollY;rememberMyReturn();}void navigate({page:'我的',type:'cards',selected:null,myView:view,creating:false,modal:0});}
+function backToMy(){navigationHistory.back(()=>void navigate({page:'我的',type:'cards',selected:null,myView:'',creating:false,modal:0},{replace:true}));}
+async function openRecord(key){const [kind,id]=key.split(':');detailScroll=window.scrollY;await navigate({page,type:kind,selected:id,myView,creating:false,modal:0});}
+function initializeRoutes(){
+  const url=new URL(location.href),pages={me:'我的',cards:'储值卡',subscriptions:'订阅',home:'总览'};
+  page=pages[url.searchParams.get('view')]||page;
+  type=url.searchParams.get('kind')==='subs'?'subs':page==='订阅'?'subs':'cards';
+  selected=url.searchParams.get('record');myView=page==='我的'&&['about','archives'].includes(url.searchParams.get('section'))?url.searchParams.get('section'):'';
+  const requested={page,type,selected,myView,creating:url.searchParams.get('new')==='1',modal:0};
+  if(requested.creating){requested.selected=crypto.randomUUID();createRecordDraft(type,requested.selected);selected=requested.selected;}
+  if(selected&&!get())selected=requested.selected=null;
+  navigationHistory.initialize({...requested,selected},routeBase(requested));navReady=true;
 }
 
 async function updateMyNotificationSummary() {
@@ -250,53 +304,30 @@ async function updateMyNotificationSummary() {
   }
 }
 
-function backFromDetail() {
-  if (!selected) return;
-  selected = null;
-  render();
-  window.scrollTo(0, detailScroll);
-}
+function backFromDetail(){if(selected)navigationHistory.back(()=>void navigate(routeBase(appRoute()),{replace:true}));}
 
-let swipeStart;
-let swipeAt = -Infinity;
-
-$('app').addEventListener('pointerdown', event => {
-  swipeStart = null;
-  if (!ready || writing || dialog.open || !event.isPrimary || event.pointerType !== 'touch') return;
-  if (!event.target.closest('.wallet-main') || event.target.closest('input, select, textarea, [contenteditable], .field-pencil')) return;
-  if (event.clientX < 18 || event.clientX > window.innerWidth - 18) return;
-  swipeStart = { id: event.pointerId, x: event.clientX, y: event.clientY, at: performance.now() };
-}, { passive: true });
-
-window.addEventListener('pointercancel', () => { swipeStart = null; });
-window.addEventListener('pointerup', event => {
-  const start = swipeStart;
-  swipeStart = null;
-  if (!ready || writing || dialog.open || !start || start.id !== event.pointerId) return;
-  const dx = event.clientX - start.x;
-  const dy = event.clientY - start.y;
-  if (Math.abs(dx) < 62 || Math.abs(dx) < Math.abs(dy) * 1.6 || performance.now() - start.at > 700) return;
-  if (selected) {
-    if (dx >= 0) return;
-    backFromDetail();
-  } else if (myView) {
-    if (dx >= 0) return;
-    backToMy();
-  } else {
-    const direction = dx < 0 ? 1 : -1;
-    const next = tabs[tabs.indexOf(page) + direction];
-    if (!next) return;
-    showPage(next, direction);
-  }
-  swipeAt = performance.now();
+installSwipeNavigation({
+  canStart: () => !writing && !authBusy && !document.querySelector('[data-discard-dialog]'),
+  onLeft: () => {
+    if (dialog.open) { closeModal(); return true; }
+    if (!ready) {
+      const back = $('app').querySelector('.auth-back-button');
+      if (!back) return false;
+      back.click(); return true;
+    }
+    if (selected) { $('app').querySelector('[data-action="back"]').click(); return true; }
+    if (myView) { backToMy(); return true; }
+    const next = tabs[tabs.indexOf(page)+1];
+    if (!next) return false;
+    showPage(next,1); return true;
+  },
+  onRight: () => {
+    if (!ready || selected || myView || dialog.open) return false;
+    const next = tabs[tabs.indexOf(page)-1];
+    if (!next) return false;
+    showPage(next,-1); return true;
+  },
 });
-
-$('app').addEventListener('click', event => {
-  if (performance.now() - swipeAt > 350 || !(event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents)) return;
-  swipeAt = -Infinity;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-}, true);
 
 const navigation = document.createElement('nav');
 navigation.className = 'nav';
@@ -306,6 +337,26 @@ navigation.innerHTML = '<span class="nav-button-highlight" aria-hidden="true"></
   tabs.map((tab, i) => '<button type="button" data-page="' + tab + '">' +
     svg(['home', 'card', 'calendar', 'user'][i]) + tab + '</button>').join('');
 $('app').after(navigation);
+const editActions=document.createElement('section');
+editActions.className='detail-editbar';editActions.hidden=true;
+editActions.setAttribute('role','group');editActions.setAttribute('aria-label','整页编辑操作');
+navigation.after(editActions);
+function updateEditViewport(){
+  const viewport=window.visualViewport;
+  const inset=editDraft && viewport && viewport.scale===1 ? Math.max(0,innerHeight-viewport.height-viewport.offsetTop) : 0;
+  document.documentElement.style.setProperty('--detail-keyboard-inset',inset+'px');
+}
+window.visualViewport?.addEventListener('resize',updateEditViewport);
+window.visualViewport?.addEventListener('scroll',updateEditViewport);
+window.addEventListener('resize',updateEditViewport);
+function updateDetailActions(){
+  const editing=Boolean(ready&&selected&&editDraft);
+  editActions.hidden=!editing;
+  document.documentElement.classList.toggle('has-detail-draft',editing);
+  editActions.innerHTML=editing?'<button class="editbar-cancel" type="button" data-action="cancel-detail" '+(writing?'disabled':'')+'>取消</button><button class="editbar-save" type="button" data-action="save-detail" '+(writing?'disabled':'')+'>'+(writing?loadingIndicator+'<span>保存中…</span>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><span>保存更改</span>')+'</button>':'';
+  updateEditViewport();
+}
+
 
 let installPrompt = null;
 let installedThisSession = false;
@@ -386,23 +437,39 @@ const dialog = $('modal');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 let closeTimer;
 
-function finishModalClose() {
-  clearTimeout(closeTimer);
-  delete dialog.dataset.closing;
-  if (dialog.open) dialog.close();
+function restoreModalFocus(cached){
+  const target=cached?.invoker?.isConnected?cached.invoker:cached?.action?$('app').querySelector('[data-action="'+cached.action+'"]'):null;
+  target?.focus({preventScroll:true});
+}
+function focusModal(){
+  const title=dialog.querySelector('h2');
+  if(title){title.id='modal-title';title.tabIndex=-1;dialog.setAttribute('aria-labelledby','modal-title');title.focus({preventScroll:true});}
+}
+function finishModalClose(historyClose=true){
+  clearTimeout(closeTimer);delete dialog.dataset.closing;
+  const cached=modalCache.get(modalLayer);
+  if(cached){cached.nodes=[...dialog.childNodes];cached.dirty=dialog.dataset.dirty==='true';}
+  if(dialog.open)dialog.close();
+  if(historyClose && navReady && modalLayer){navigationHistory.back(()=>{modalLayer=0;navigationHistory.replace(appRoute());});}
+  else if(!historyClose)modalLayer=0;
+  restoreModalFocus(cached);
 }
 
-function closeModal() {
+function closeModal(committed = false) {
+  if (writing && !committed) { toast('正在保存，请稍候。'); return; }
   if (!dialog.open || 'closing' in dialog.dataset || dialog.getAttribute('aria-busy') === 'true') return;
-  if (reduceMotion.matches) {
-    finishModalClose();
+  if (dialog.dataset.dirty === 'true') {
+    confirmDiscardChanges(() => { delete dialog.dataset.dirty;const cached=modalCache.get(modalLayer);if(cached)cached.invalid=true;closeModal(); });
     return;
   }
+  if (reduceMotion.matches) { finishModalClose(); return; }
   dialog.dataset.closing = '';
   // Fallback if the exit animation is skipped or interrupted.
-  closeTimer = setTimeout(finishModalClose, 220);
+  closeTimer = setTimeout(()=>finishModalClose(), 220);
 }
 
+dialog.addEventListener('input', () => { dialog.dataset.dirty='true'; });
+dialog.addEventListener('change', () => { dialog.dataset.dirty='true'; });
 dialog.addEventListener('animationend', event => {
   if (event.target === dialog && ['dialog-exit','sheet-exit'].includes(event.animationName) && 'closing' in dialog.dataset) {
     finishModalClose();
@@ -418,13 +485,19 @@ dialog.addEventListener('cancel', event => {
   closeModal();
 });
 
-function modal(content, {sheet = false} = {}) {
-  clearTimeout(closeTimer);
-  delete dialog.dataset.closing;
+function modal(content,{sheet=false}={}){
+  const invoker=dialog.open?modalCache.get(modalLayer)?.invoker:document.activeElement;
+  clearTimeout(closeTimer);delete dialog.dataset.closing;delete dialog.dataset.dirty;
   dialog.classList.toggle('bottom-sheet',sheet);
-  dialog.innerHTML = '<button class="close" data-action="close" aria-label="关闭">×</button>' + content;
-  if (!dialog.open) dialog.showModal();
+  dialog.innerHTML='<button class="close" data-action="close" aria-label="关闭">×</button>'+content;
+  if(!dialog.open){
+    modalLayer=++modalSequence;
+    if(navReady)navigationHistory.push(appRoute());
+    dialog.showModal();
+  }
+  modalCache.set(modalLayer,{nodes:[...dialog.childNodes],sheet,invoker,action:invoker?.dataset?.action});focusModal();
 }
+
 function defaults(cycle) {
   if (cycle === '按月') return [3, 1];
   if (cycle === '按年' || cycle === '两年及以上') return [30, 7, 1];
@@ -479,7 +552,7 @@ async function changeArchivedRecord(key, remove = false) {
   try {
     await changeRecord(kind, entry, { archived: false }, {
       remove, error: dialog.open ? dialog.querySelector('#archive-error') : $('archive-error'), successMessage: remove ? '已永久删除' : '已恢复',
-      done: () => { const scroll = window.scrollY; finishModalClose(); render(); window.scrollTo(0,scroll); },
+      done: () => { const scroll = window.scrollY;const cached=modalCache.get(modalLayer);if(cached)cached.invalid=true;finishModalClose(); render(); window.scrollTo(0,scroll); },
       onFailure: () => {
         // Refresh the list after a conflict; a changed record requires a new confirmation.
         if (data[kind].find(item => item.id === id)?.version !== entry.version) { finishModalClose(); render(); }
@@ -491,79 +564,24 @@ async function changeArchivedRecord(key, remove = false) {
   }
 }
 
-function add(kind) {
-  const isCard = kind === 'cards';
-  const amount = isCard ? 'balance' : 'fee';
-  const id = crypto.randomUUID();
-  modal(`<h2>添加记录</h2>
-    <div class="seg">
-      <button type="button" class="${isCard ? 'active' : ''}" data-type="cards">储值卡</button>
-      <button type="button" class="${isCard ? '' : 'active'}" data-type="subs">订阅</button>
-    </div>
-    <form id="record-form" class="record-form" novalidate>
-      <label for="record-name">名称 *</label>
-      <input id="record-name" name="name" required aria-describedby="name-hint"><small id="name-hint" class="field-hint">名称最多 80 个字符</small>
-      <label for="record-amount">${isCard ? '余额' : '费用'}（元，可留空）</label>
-      <input id="record-amount" name="${amount}" type="number" min="0" max="90000000000" step="0.01">
-      ${isCard ? '' : `<label for="record-cycle">订阅周期</label>
-        <select id="record-cycle" name="cycle">${[...cycles.keys()].map(c => `<option value="${c}">${c || '未填写'}</option>`).join('')}</select>`}
-      ${isCard ? '' : `<label for="record-renew">自动续约（选填）</label>
-        <select id="record-renew" name="autoRenew">${renewalOptions(null)}</select>`}
-      <label for="record-date">${isCard ? '有效期' : '到期日'}</label>
-      <input id="record-date" name="date" type="date">
-      <label for="record-note">备注</label>
-      <textarea id="record-note" name="note" rows="3" aria-describedby="note-hint"></textarea><small id="note-hint" class="field-hint">备注最多 200 个字符</small>
-      <p class="error" role="alert" id="record-error"></p>
-      <button class="primary" type="submit">保存记录</button>
-    </form>`);
-  $('record-form').onsubmit = async event => {
-    event.preventDefault();
-    if (writing || 'closing' in dialog.dataset) return;
-    const form = event.currentTarget;
-    const values = new FormData(form);
-    const name = values.get('name').trim();
-    const error = $('record-error');
-    const invalid = [...form.elements].find(field => {
-      if (!field.name) return false;
-      const message = recordFieldError(field.name, field.value) || (!field.checkValidity() ? '请填写有效的日期或金额。' : '');
-      field.setAttribute('aria-invalid', String(Boolean(message)));
-      if (message) error.textContent = message;
-      return Boolean(message);
-    });
-    if (invalid) {
-      invalid.setAttribute('aria-describedby', 'record-error');
-      invalid.focus();
-      return;
-    }
-    error.textContent = '';
-    const changes = {
-      name, date: values.get('date'), note: values.get('note'),
-      [amount]: values.get(amount) === '' ? null : Number(values.get(amount)),
-    };
-    if (!isCard) {
-      changes.cycle = values.get('cycle');
-      const autoRenew = parseRenewal(values.get('autoRenew'));
-      if (autoRenew !== null) changes.autoRenew = autoRenew;
-    }
-    for (const el of form.elements) el.disabled = true;
-    await changeRecord(kind, null, changes, {
-      id, error,
-      done: () => {
-        detailScroll = window.scrollY;
-        type = kind;
-        selected = id;
-        closeModal();
-        render();
-      },
-    });
-    for (const el of form.elements) el.disabled = false;
-  };
+function createRecordDraft(kind,id=crypto.randomUUID()){
+  dismissToast();
+  const base={id,version:0,name:'',date:'',note:'',archived:false,...(kind==='cards'?{balance:null,history:[],updated:''}:{fee:null,cycle:'',autoRenew:null,reminderDays:null})};
+  const raw=rawRecord(base,kind);editDraft={isNew:true,base,raw:{...raw},original:{...raw},reminderDays:base.reminderDays};
+  detailError='';detailFieldErrors={};
+}
+async function add(kind){
+  if(writing)return;
+  const next={page,type:kind,selected:crypto.randomUUID(),myView,creating:true,modal:0};
+  await navigate(next,{replace:Boolean(editDraft?.isNew)});
+  $('app').querySelector('[data-field="name"]')?.focus({preventScroll:true});
 }
 
 function reminderDialog(recommended = false) {
   const entry = get();
-  const chosen = (recommended ? null : entry.reminderDays) ?? defaults(entry.cycle);
-  modal(`<h2>到期提醒设置</h2><p class="muted">提醒时间会保存到你的账号。设备通知尚未启用。</p>
+  if (!editDraft) return;
+  const chosen = (recommended ? null : editDraft.reminderDays) ?? defaults(editDraft.raw.cycle);
+  modal(`<h2>到期提醒设置</h2><p class="muted">选择后点击「完成」，再用底部「保存更改」统一提交。</p>
     <div class="rem-options" id="rem-options" role="group" aria-label="提醒时间">
       ${[0, 1, 3, 7, 14, 30].map(n => `<button type="button" class="rem-choice" data-rem-day="${n}" aria-pressed="${chosen.includes(n)}">
         <span>${n === 0 ? '到期当天' : '提前 ' + n + ' 天'}</span><span class="rem-check" aria-hidden="true">✓</span>
@@ -571,8 +589,9 @@ function reminderDialog(recommended = false) {
     </div>
     <button class="rem-recommend" data-action="recommend-rem">按订阅周期推荐</button>
     <p class="error" role="alert" id="rem-error"></p>
-    <button id="rem-save" class="primary" data-action="save-rem" ${chosen.length ? '' : 'disabled'}>保存设置</button>
+    <button id="rem-save" class="primary" data-action="save-rem" ${chosen.length ? '' : 'disabled'}>完成</button>
     <button class="secondary" data-action="off-rem">关闭提醒</button>`);
+  if (recommended) dialog.dataset.dirty='true';
 }
 
 function exportWallet() {
@@ -591,30 +610,27 @@ document.addEventListener('click', async event => {
   if (button.dataset.deleteRecord && !writing) confirmRecordDelete(button.dataset.deleteRecord);
   if (button.dataset.confirmDelete && !writing) await changeArchivedRecord(button.dataset.confirmDelete, true);
   if (button.dataset.page) showPage(button.dataset.page);
-  if (button.dataset.open) {
-    detailScroll = window.scrollY;
-    [type, selected] = button.dataset.open.split(':');
-    closeModal();
-    render();
-    window.scrollTo(0, 0);
-  }
-  if (button.dataset.addKind && !writing) add(button.dataset.addKind);
-  if (button.dataset.recordBalance) {
-    detailScroll = window.scrollY;
-    type = 'cards';
-    selected = button.dataset.recordBalance;
-    render();
-    window.scrollTo(0, 0);
-    $('app').querySelector('[data-field="balance"]').closest('.field-view').querySelector('.field-pencil').click();
-  }
+  if(button.dataset.open)await openRecord(button.dataset.open);
+  if(button.dataset.addKind&&!writing)await add(button.dataset.addKind);
+  if(button.dataset.recordBalance){await openRecord('cards:'+button.dataset.recordBalance);beginDetailEdit();$('app').querySelector('[data-field="balance"]')?.focus();}
   if (button.dataset.type && !writing) add(button.dataset.type);
   if (button.hasAttribute('data-rem-day') && !writing) {
+    dialog.dataset.dirty='true';
     button.setAttribute('aria-pressed', button.getAttribute('aria-pressed') !== 'true');
     $('rem-save').disabled = !dialog.querySelector('[data-rem-day][aria-pressed="true"]');
   }
   switch (button.dataset.action) {
     case 'close':
       closeModal();
+      break;
+    case 'edit-detail':
+      if (!writing) beginDetailEdit();
+      break;
+    case 'cancel-detail':
+      if (!writing) cancelDetailEdit();
+      break;
+    case 'save-detail':
+      await saveDetail();
       break;
     case 'back':
       backFromDetail();
@@ -624,6 +640,7 @@ document.addEventListener('click', async event => {
       break;
     case 'notifications':
       rememberMyReturn();
+      sessionStorage.setItem('saldo.notificationFromApp','true');
       location.assign('/notification-settings.html');
       break;
     case 'my-back':
@@ -636,9 +653,12 @@ document.addEventListener('click', async event => {
       if (!writing) add(page === '订阅' ? 'subs' : 'cards');
       break;
     case 'archive': {
-      const entry = get();
-      await changeRecord(type, entry, { archived: !entry.archived }, {
-        done: () => { selected = null; render(); },
+      const entry=get(),kind=type,restoring=entry.archived;
+      await changeRecord(kind,entry,{archived:!entry.archived},{
+        successMessage:restoring?'已恢复记录':'已移除记录',
+        done:()=>{clearDetailDraft();navigationHistory.back(()=>{selected=null;navigationHistory.replace(appRoute());render();});
+          if(!restoring){const fresh=data[kind].find(row=>row.id===entry.id);queueMicrotask(()=>toast('已移除记录',{action:async()=>{await changeRecord(kind,fresh,{archived:false},{successMessage:'已撤销移除'});}}));}
+        },
       });
       break;
     }
@@ -650,10 +670,12 @@ document.addEventListener('click', async event => {
     case 'off-rem': {
       const days = button.dataset.action === 'off-rem' ? [] :
         Array.from(dialog.querySelectorAll('[data-rem-day][aria-pressed="true"]'), el => Number(el.dataset.remDay));
-      await changeRecord(type, get(), { reminderDays: days }, {
-        error: $('rem-error'),
-        done: () => { closeModal(); render(); },
-      });
+      if (!editDraft || writing) break;
+      editDraft.reminderDays = days;
+      delete dialog.dataset.dirty;
+      finishModalClose();
+      const scroll = window.scrollY;
+      render(); window.scrollTo(0,scroll);
       break;
     }
     case 'archives': {
@@ -685,117 +707,116 @@ document.addEventListener('click', async event => {
   }
 });
 
-function fieldError(field, message) {
-  const view = field.closest('.field-view');
-  view.classList.add('editing');
-  field.setAttribute('aria-invalid', String(Boolean(message)));
-  let error = view.querySelector('.inline-error');
-  if (!error) {
-    error = document.createElement('p');
-    error.className = 'inline-error error';
-    error.id = 'error-'+field.dataset.field;
-    error.setAttribute('role', 'alert');
-    view.append(error);
-    field.setAttribute('aria-describedby', error.id);
-  }
-  error.textContent = message;
+function clearDetailDraft() {
+  editDraft = null; detailError = ''; detailFieldErrors = {};
+  updateDetailActions();
 }
-
+function rawRecord(entry,kind=type) {
+  const names=kind==='cards'?['name','balance','date','note']:['name','date','cycle','fee','autoRenew','note'];
+  return Object.fromEntries(names.map(name=>[name,entry[name]===null || entry[name]===undefined ? '' : String(entry[name])]));
+}
+function sameReminders(a,b) {
+  if(a==null || b==null)return a==null && b==null;
+  return JSON.stringify([...a].sort((x,y)=>x-y))===JSON.stringify([...b].sort((x,y)=>x-y));
+}
+function detailIsDirty() {
+  return editDraft && (JSON.stringify(editDraft.raw)!==JSON.stringify(editDraft.original) || !sameReminders(editDraft.reminderDays,editDraft.base.reminderDays));
+}
+function reminderSummary(reminders,cycle) {
+  return esc(reminders?.length===0?'已关闭':formatReminders(reminders??defaults(cycle))).split('、').map(text=>'<span class="reminder-token">'+text+'</span>').join('、');
+}
+function beginDetailEdit() {
+  if (!selected || writing || editDraft) return;
+  dismissToast();
+  const entry=get(),raw=rawRecord(entry);
+  editDraft={base:structuredClone(entry),raw:{...raw},original:{...raw},reminderDays:entry.reminderDays==null ? entry.reminderDays : [...entry.reminderDays]};
+  // Cards have no reminder field; preserve the original undefined dirty baseline.
+  if(type==='cards')editDraft.reminderDays=entry.reminderDays;
+  detailError='';detailFieldErrors={};
+  const scroll=window.scrollY;render();window.scrollTo(0,scroll);
+}
+function cancelDetailEdit() {
+  if(!editDraft || writing)return;
+  const cancel=()=>{if(editDraft?.isNew){clearDetailDraft();backFromDetail();return;}const scroll=window.scrollY;clearDetailDraft();render();window.scrollTo(0,scroll);$('app').querySelector('[data-action="edit-detail"]')?.focus({preventScroll:true});};
+  if(detailIsDirty())confirmDiscardChanges(cancel);else cancel();
+}
 function decorateFields() {
-  document.querySelectorAll('#app [data-field]').forEach(field => {
-    const name = field.dataset.field;
-    const view = document.createElement('div');
-    const value = document.createElement('span');
-    const pencil = document.createElement('button');
-    view.className = 'field-view';
-    value.className = 'field-value'+(field.value === '' ? ' empty' : '');
-    let display = name === 'autoRenew' ? field.selectedOptions[0].textContent : field.value;
-    if ((name === 'balance' || name === 'fee') && display !== '') {
-      value.classList.add('money-number');
-      value.innerHTML = (name === 'fee' ? '¥' : '')+amountMarkup(money(display));
-    } else {
-      if (name === 'date' && display) display = display.replaceAll('-', ' / ');
-      value.textContent = display || (name === 'balance' ? '待更新' : '未填写');
+  document.querySelectorAll('#app [data-field]').forEach(field=>{
+    const name=field.dataset.field,view=document.createElement('div'),value=document.createElement('span');
+    view.className='field-view'+(editDraft?' editing':'');
+    value.className='field-value'+(field.value===''?' empty':'');
+    let display=name==='autoRenew'?field.selectedOptions[0].textContent:field.value;
+    if((name==='balance'||name==='fee') && display!==''){
+      value.classList.add('money-number');value.innerHTML=(name==='fee'?'¥':'')+amountMarkup(money(display));
+    }else{
+      if(name==='date'&&display)display=display.replaceAll('-',' / ');
+      value.textContent=display||(name==='balance'?'待更新':'未填写');
     }
-    pencil.className = 'field-pencil';
-    pencil.type = 'button';
-    pencil.setAttribute('aria-label', '修改'+(field.getAttribute('aria-label') || name));
-    pencil.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m15 4 5 5M4 15 16 3a2 2 0 0 1 5 5L9 20l-6 1z"/></svg>';
-    field.before(view);
-    view.append(value, pencil, field);
-    field.classList.add('field-edit');
-    pencil.onclick = () => {
-      view.classList.add('editing');
-      field.focus();
-      if (field.type === 'date' && field.showPicker) {
-        try { field.showPicker(); } catch {}
-      }
+    field.before(view);view.append(value,field);field.classList.add('field-edit');
+    if(!editDraft)return;
+    if(name==='name'){field.required=true;field.setAttribute('aria-required','true');field.placeholder='名称（必填）';}
+    field.value=editDraft.raw[name];field.disabled=writing;
+    if(field.tagName==='INPUT')field.setAttribute('enterkeyhint','next');
+    const error=detailFieldErrors[name];
+    if(error){
+      field.setAttribute('aria-invalid','true');field.setAttribute('aria-describedby','detail-error-'+name);
+      const message=document.createElement('p');message.className='inline-error error';message.id='detail-error-'+name;message.setAttribute('role','alert');message.textContent=error;view.append(message);
+    }
+    const update=()=>{
+      editDraft.raw[name]=field.value;
+      if(name==='date' && $('app').querySelector('.detail-status'))$('app').querySelector('.detail-status').textContent=status(field.value);
+      if(name==='cycle' && $('app').querySelector('.reminder-copy'))$('app').querySelector('.reminder-copy').innerHTML=reminderSummary(editDraft.reminderDays,field.value);
+      delete detailFieldErrors[name];field.removeAttribute('aria-invalid');field.removeAttribute('aria-describedby');view.querySelector('.inline-error')?.remove();
+      if(detailError){detailError='';$('detail-error')?.remove();}
     };
-    field.addEventListener('input', () => {
-      delete field.dataset.failedValue;
-      field.setAttribute('aria-invalid', 'false');
-      const error = view.querySelector('.inline-error');
-      if (error) error.textContent = '';
-    });
-    field.addEventListener('keydown', event => {
-      if (event.key === 'Escape') {
-        field.value = get()[name] ?? '';
-        field.blur();
-        render();
-      } else if (event.key === 'Enter' && !['SELECT', 'TEXTAREA'].includes(field.tagName)) {
+    field.addEventListener('input',update);field.addEventListener('change',update);
+    field.addEventListener('keydown',event=>{
+      if(event.isComposing)return;
+      if(event.key==='Escape'){event.preventDefault();cancelDetailEdit();}
+      else if(event.key==='Enter' && field.tagName==='INPUT'){
         event.preventDefault();
-        field.blur();
+        const fields=[...$('app').querySelectorAll('[data-field]')];
+        (fields[fields.indexOf(field)+1]||document.querySelector('[data-action="save-detail"]')).focus();
       }
     });
   });
 }
-
-function persistInline(event) {
-  const field = event.target;
-  const name = field.dataset.field;
-  if (!name || !ready || !selected || !field.isConnected || field.dataset.submitted || field.dataset.failedValue === field.value) return;
-  const entry = get();
-  const number = name === 'balance' || name === 'fee';
-  const message = recordFieldError(name, field.value) || (!field.checkValidity() ? '请填写有效的日期或金额。' : '');
-  if (message) {
-    fieldError(field, message);
-    return;
+async function saveDetail() {
+  if(!editDraft || writing || !selected)return;
+  dismissToast();
+  const draft=editDraft,kind=type,scroll=window.scrollY;
+  detailFieldErrors={};
+  const fields=[...$('app').querySelectorAll('[data-field]')];
+  for(const field of fields){
+    draft.raw[field.dataset.field]=field.value;
+    const message=recordFieldError(field.dataset.field,field.value)||(!field.checkValidity()?'请填写有效的日期或金额。':'');
+    if(message)detailFieldErrors[field.dataset.field]=message;
   }
-  const value = name === 'autoRenew' ? parseRenewal(field.value)
-    : number ? (field.value === '' ? null : Number(field.value)) : field.value.trim();
-  if (value === (entry[name] ?? (number || name === 'autoRenew' ? null : ''))) {
-    field.closest('.field-view').classList.remove('editing');
-    return;
+  if(Object.keys(detailFieldErrors).length){
+    render();const field=$('app').querySelector('[data-field="'+Object.keys(detailFieldErrors)[0]+'"]');field.focus();return;
   }
-  if (writing) {
-    fieldError(field, '正在保存另一项修改，请稍后重试。');
-    return;
+  if(!draft.isNew && !detailIsDirty()){clearDetailDraft();render();window.scrollTo(0,scroll);toast('没有需要保存的修改');return;}
+  const changes={};
+  for(const [name,raw] of Object.entries(draft.raw)){
+    if(!draft.isNew && raw===draft.original[name])continue;
+    const value=name==='autoRenew'?parseRenewal(raw):name==='balance'||name==='fee'?(raw===''?null:Number(raw)):name==='note'?raw:raw.trim();
+    // Do not rewrite unchanged numeric values or coerce an existing long cycle.
+    if(draft.isNew || value!==(draft.base[name]??(name==='balance'||name==='fee'||name==='autoRenew'?null:'')))changes[name]=value;
   }
-  const draft = field.value;
-  const kind = type;
-  field.dataset.submitted = 'true';
-  field.disabled = true;
-  void changeRecord(type, entry, { [name]: value }, {
-    done: () => {
-      render();
-      const view = document.querySelector('[data-field="'+name+'"]')?.closest('.field-view');
-      if (view) {
-        view.classList.add('saved');
-        setTimeout(() => view.classList.remove('saved'), 540);
-      }
-    },
-    onFailure: message => {
-      if (selected !== entry.id || type !== kind) return;
-      const restored = $('app').querySelector('[data-field="'+name+'"]');
-      if (!restored) return;
-      restored.value = draft;
-      restored.dataset.failedValue = draft;
-      fieldError(restored, message);
-    },
+  if(!sameReminders(draft.reminderDays,draft.base.reminderDays))changes.reminderDays=draft.reminderDays;
+  if(!Object.keys(changes).length){clearDetailDraft();render();window.scrollTo(0,scroll);toast('没有需要保存的修改');return;}
+  detailError='';
+  const pending=changeRecord(kind,draft.isNew?null:draft.base,changes,{id:draft.base.id,
+    done:()=>{clearDetailDraft();navigationHistory.replace(appRoute());render();window.scrollTo(0,scroll);$('app').querySelector('[data-action="edit-detail"]')?.focus({preventScroll:true});},
+    onFailure:message=>{if(editDraft===draft)detailError=message+(message.includes('其他设备')?' 请取消编辑，核对最新数据后再修改。':'');},
   });
+  render();window.scrollTo(0,scroll);
+  await pending;
+  if(editDraft===draft){render();window.scrollTo(0,scroll);}
 }
-document.addEventListener('change', persistInline);
-document.addEventListener('focusout', persistInline);
+window.addEventListener('beforeunload',event=>{
+  if(detailIsDirty() || (dialog.open && dialog.dataset.dirty==='true')){event.preventDefault();event.returnValue='';}
+});
 let authScreen = 'welcome';
 let authMessage = '';
 let authEmail = '';
@@ -864,6 +885,7 @@ function accountNavigation() {
         }
         return;
       }
+      if(button.classList.contains('auth-back-button')&&history.state?.saldoAuth&&history.state.index>0){history.back();return;}
       setAuthScreen(button.dataset.screen);
     };
   }
@@ -1112,6 +1134,7 @@ function authError(error) {
 function setAuthScreen(screen, message = '') {
   authScreen = ['login','password','signup'].includes(screen) ? 'continue' : screen;
   authMessage = message;
+  if(!currentSession){const previous=history.state;const state={saldoAuth:true,screen:authScreen,index:previous?.saldoAuth?previous.index+(previous.screen===authScreen?0:1):0};history[previous?.saldoAuth&&previous.screen!==authScreen?'pushState':'replaceState'](state,'',location.href);}
   showAccount();
   window.scrollTo(0,0);
 }
@@ -1165,18 +1188,21 @@ async function switchSession(session, { force = false, recovery = false, message
   if (session) { otpEmail = ''; otpResendAt = 0; }
   const revision = ++sessionRevision;
   ready = false;
+  navReady=false;
   writing = false;
   data = emptyWallet();
   selected = null;
+  clearDetailDraft();
   const route = new URL(location.href);
   page = route.searchParams.get('view') === 'me' ? '我的' : '总览';
   myView = page === '我的' && ['about','archives'].includes(route.searchParams.get('section')) ? route.searchParams.get('section') : '';
-  if (oldId !== session?.user.id) { summaryOwner = null; notificationSummary = '查看接收方式'; }
+  if (oldId !== session?.user.id) { for(const key of Object.keys(tabStates))delete tabStates[key];summaryOwner = null; notificationSummary = '查看接收方式'; }
   try { const saved = JSON.parse(sessionStorage.getItem('saldo.myReturn')); myScroll = saved?.user === session?.user.id ? saved.scroll : 0; } catch { myScroll = 0; }
   query = '';
   sort = 'default';
   syncMessage = '';
-  finishModalClose();
+  finishModalClose(false);
+  modalCache.clear();
   dialog.replaceChildren();
   document.querySelector('.toast')?.remove();
   if (!session || recovery) {
@@ -1194,10 +1220,11 @@ async function switchSession(session, { force = false, recovery = false, message
     if (revision !== sessionRevision) return;
     data = wallet;
     ready = true;
+    initializeRoutes();
     render();
     if (page === '我的' && !myView) window.scrollTo(0,myScroll);
     if (route.searchParams.get('install') === '1') {
-      route.searchParams.delete('install'); history.replaceState(null,'',route); installGuide();
+      route.searchParams.delete('install'); history.replaceState(history.state,'',route); installGuide();
     }
   } catch {
     if (revision === sessionRevision) walletStatus('暂时无法读取钱包，请稍后重试。', { retry: true });
@@ -1206,6 +1233,8 @@ async function switchSession(session, { force = false, recovery = false, message
 
 async function changeRecord(kind, previous, changes, { id, error, done, onFailure, remove = false, successMessage = '已保存' } = {}) {
   if (!ready || writing) return;
+  dismissToast();
+  if(!navigator.onLine){const message='当前离线，尚未保存。请联网后重试。';syncMessage=onFailure||error?'':message;onFailure?.(message);if(error?.isConnected)error.textContent=message;else if(!onFailure)toast(message);return;}
   const revision = sessionRevision;
   const user = currentSession.user.id;
   writing = true;
@@ -1246,11 +1275,13 @@ async function changeRecord(kind, previous, changes, { id, error, done, onFailur
         if (revision !== sessionRevision) return;
       }
     }
-    syncMessage = stale ? '记录已在其他设备修改。请核对最新值并重新提交。' : remove ? '删除失败，记录仍保留，请重试。' : '保存失败，请重试。';
+    const message = !navigator.onLine ? '网络连接已断开，尚未保存。请联网后重试。' : stale ? '记录已在其他设备修改。请核对最新值并重新提交。' : remove ? '删除失败，记录仍保留，请重试。' : '保存失败，请重试。';
+    syncMessage=onFailure||error?'':message;
     render();
-    onFailure?.(syncMessage);
-    if (error?.isConnected) error.textContent = syncMessage;
-    else toast(syncMessage);
+    onFailure?.(message);
+    const liveError=error?.isConnected?error:error?.id?$(error.id):null;
+    if(liveError)liveError.textContent=message;
+    else if(!onFailure)toast(message);
   } finally {
     if (revision === sessionRevision) writing = false;
   }
@@ -1284,3 +1315,7 @@ async function start() {
 }
 
 void start();
+
+document.addEventListener('click',event=>{if(event.target.closest('a[href="/terms.html?from=me"]'))sessionStorage.setItem('saldo.termsFromApp','true');});
+
+window.addEventListener('popstate',event=>{if(!event.state?.saldoAuth)return;if(ready){const next=routeBase(appRoute());navigationHistory.initialize(next);applyRoute(next,appRoute());}else if(!currentSession){authScreen=event.state.screen;authMessage='';showAccount();window.scrollTo(0,0);}});
