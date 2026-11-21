@@ -1,0 +1,12 @@
+验证你的邮箱
+
+我们收到了你的注册请求，请验证邮箱，完成账号注册。
+
+{{ if .Email }}账号邮箱：{{ .Email }}{{ end }}
+
+验证邮箱：{{ .SiteURL }}/?token_hash={{ .TokenHash }}&type=signup
+
+如果你没有注册 Saldo，请忽略这封邮件。
+链接失效时，请返回 Saldo（https://saldo.tobmarket.ing/） 重新申请验证邮件。
+
+需要帮助：service@saldo.tobmarket.ing

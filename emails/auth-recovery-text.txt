@@ -1,0 +1,12 @@
+重置你的密码
+
+我们收到了你的密码重置请求，请为账号设置新密码。
+
+{{ if .Email }}账号邮箱：{{ .Email }}{{ end }}
+
+重置密码：{{ .SiteURL }}/?token_hash={{ .TokenHash }}&type=recovery
+
+如果你没有申请重置密码，请忽略这封邮件，你的密码不会因此改变。
+链接失效时，请返回 Saldo（https://saldo.tobmarket.ing/） 重新申请。
+
+需要帮助：service@saldo.tobmarket.ing

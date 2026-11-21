@@ -1,0 +1,10 @@
+手机号已更新
+
+你的 Saldo 账号手机号已更新。
+
+{{ if .OldPhone }}变更前手机号：{{ .OldPhone }}{{ end }}
+{{ if .Phone }}变更后手机号：{{ .Phone }}{{ end }}
+
+如果这是你的操作，无需进一步处理。
+
+如果这不是你的操作，请立即联系 Saldo（service@saldo.tobmarket.ing），协助核查手机号和账号访问权限。

@@ -1,0 +1,9 @@
+验证方式已移除
+
+你的 Saldo 账号已移除下方验证方式。
+
+{{ if .FactorType }}移除的验证方式：{{ .FactorType }}{{ end }}
+
+如果这是你的操作，无需进一步处理。
+
+如果这不是你的操作，请立即联系 Saldo（service@saldo.tobmarket.ing），核查已移除的验证方式及账号安全。

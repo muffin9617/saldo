@@ -1,0 +1,12 @@
+你收到了邀请
+
+你收到了使用 Saldo 的邀请，请确认认识邀请方后再继续。
+
+{{ if .Email }}账号邮箱：{{ .Email }}{{ end }}
+
+接受邀请：{{ .ConfirmationURL }}
+
+如果你不认识邀请方，请勿接受邀请，可忽略这封邮件。
+链接失效时，请联系邀请方重新发送。
+
+需要帮助：service@saldo.tobmarket.ing

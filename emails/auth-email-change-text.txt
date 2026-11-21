@@ -1,0 +1,10 @@
+确认邮箱变更
+
+我们收到了更换账号邮箱的请求，请核对下方信息并完成确认。
+
+{{ if .NewEmail }}目标邮箱：{{ .NewEmail }}{{ end }}
+
+确认邮箱变更：{{ .ConfirmationURL }}
+
+如果这不是你的操作，请勿确认此请求，并联系 Saldo（service@saldo.tobmarket.ing）。
+链接失效时，请重新发起邮箱变更。

@@ -25,3 +25,5 @@ Supabase 提供邮箱密码、Google 账号验证和个人数据存储。统一�
 - 发布范围与验收见 [2026-11-20 发布记录](docs/release-20261120.md)。
 
 本轮交互约定见 [交互规范](docs/interaction-guidelines.md)，导航回归测试为 `node tests/navigation.cjs`。当前草稿仅保留在页面内存，离线不自动同步。
+
+邮件场景 M01–M14 及功能编号见 [产品逻辑图](docs/product-map.md)；文案与交互遵循 [邮件内容规范](docs/email-content-guidelines.md)。提醒模板已部署到 saldo-notifications v19，账号邮件模板需在 Supabase Auth 独立保存；详见 [邮件发布记录](docs/email-release-20261121.md)。
