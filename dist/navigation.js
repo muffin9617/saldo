@@ -1,5 +1,5 @@
 // Keep only route identifiers in history; drafts remain in memory.
-export function createHistoryNavigation({apply,needsGuard,confirmLeave}) {
+export function createHistoryNavigation({apply,needsGuard,confirmLeave,signal}) {
   let current=null,restoring=null,approved=null,queuedReplace=false;
   if('scrollRestoration' in history)history.scrollRestoration='manual';
   const make=(route,index)=>({saldoNavigation:true,key:crypto.randomUUID(),index,route});
@@ -33,7 +33,7 @@ export function createHistoryNavigation({apply,needsGuard,confirmLeave}) {
       restoring={target,delta};history.go(-delta);return;
     }
     accept(target);
-  });
+  },{signal});
   return {
     initialize(route,base){
       const old=history.state;

@@ -1,3 +1,6 @@
+import {loadLedger} from './ledger-store.js';
+import {mountLedger} from './ledger-app.js';
+let ledgerController=null;
 import { createHistoryNavigation } from './navigation.js';
 import { installSwipeNavigation, confirmDiscardChanges } from './gestures.js';
 import { client, callbackUrl, completeAuthCallback, continueWithPassword, hasAcceptedTerms, acceptTerms, rememberGoogleConsent, completeGoogleConsent } from './auth.js';
@@ -307,7 +310,7 @@ async function updateMyNotificationSummary() {
 function backFromDetail(){if(selected)navigationHistory.back(()=>void navigate(routeBase(appRoute()),{replace:true}));}
 
 installSwipeNavigation({
-  canStart: () => !writing && !authBusy && !document.querySelector('[data-discard-dialog]'),
+  canStart: () => !ledgerController && !writing && !authBusy && !document.querySelector('[data-discard-dialog]'),
   onLeft: () => {
     if (dialog.open) { closeModal(); return true; }
     if (!ready) {
@@ -468,19 +471,19 @@ function closeModal(committed = false) {
   closeTimer = setTimeout(()=>finishModalClose(), 220);
 }
 
-dialog.addEventListener('input', () => { dialog.dataset.dirty='true'; });
-dialog.addEventListener('change', () => { dialog.dataset.dirty='true'; });
-dialog.addEventListener('animationend', event => {
+dialog.addEventListener('input', () => {if(ledgerController)return; dialog.dataset.dirty='true'; });
+dialog.addEventListener('change', () => {if(ledgerController)return; dialog.dataset.dirty='true'; });
+dialog.addEventListener('animationend', event => {if(ledgerController)return;
   if (event.target === dialog && ['dialog-exit','sheet-exit'].includes(event.animationName) && 'closing' in dialog.dataset) {
     finishModalClose();
   }
 });
-dialog.addEventListener('click', event => {
+dialog.addEventListener('click', event => {if(ledgerController)return;
   if (!('closing' in dialog.dataset)) return;
   event.preventDefault();
   event.stopImmediatePropagation();
 }, true);
-dialog.addEventListener('cancel', event => {
+dialog.addEventListener('cancel', event => {if(ledgerController)return;
   event.preventDefault();
   closeModal();
 });
@@ -815,7 +818,7 @@ async function saveDetail() {
   if(editDraft===draft){render();window.scrollTo(0,scroll);}
 }
 window.addEventListener('beforeunload',event=>{
-  if(detailIsDirty() || (dialog.open && dialog.dataset.dirty==='true')){event.preventDefault();event.returnValue='';}
+  if(!ledgerController&&(detailIsDirty() || (dialog.open && dialog.dataset.dirty==='true'))){event.preventDefault();event.returnValue='';}
 });
 let authScreen = 'welcome';
 let authMessage = '';
@@ -1184,6 +1187,7 @@ async function switchSession(session, { force = false, recovery = false, message
   currentSession = session;
   if (session?.user.email) authEmail = session.user.email;
   if (!force && oldId === session?.user.id && (oldId || !recovery)) return;
+  ledgerController?.destroy();ledgerController=null;
   clearInterval(otpTimer);
   if (session) { otpEmail = ''; otpResendAt = 0; }
   const revision = ++sessionRevision;
@@ -1215,17 +1219,11 @@ async function switchSession(session, { force = false, recovery = false, message
     if (revision !== sessionRevision) return;
     if (!accepted) { showTermsGate(session); return; }
     const [wallet] = await Promise.all([
-      loadWallet(client, session.user.id), loadNotificationPreferences(session.user.id),
+      loadLedger(client, session.user.id), loadNotificationPreferences(session.user.id),
     ]);
     if (revision !== sessionRevision) return;
-    data = wallet;
-    ready = true;
-    initializeRoutes();
-    render();
-    if (page === '我的' && !myView) window.scrollTo(0,myScroll);
-    if (route.searchParams.get('install') === '1') {
-      route.searchParams.delete('install'); history.replaceState(history.state,'',route); installGuide();
-    }
+    ledgerController=mountLedger({client,session,initial:wallet});
+
   } catch {
     if (revision === sessionRevision) walletStatus('暂时无法读取钱包，请稍后重试。', { retry: true });
   }

@@ -1,6 +1,6 @@
 // Hierarchy wins: a child page handles left-swipe as Back; root tabs handle
 // left/right as next/previous. Vertical scrolling and native edge gestures stay free.
-export function installSwipeNavigation({onLeft,onRight,canStart=()=>true,root=document}) {
+export function installSwipeNavigation({onLeft,onRight,canStart=()=>true,root=document,signal}) {
   let start=null,swipedAt=-Infinity;
   const blocked='input,select,textarea,[contenteditable],.field-pencil,.field-actions,.detail-editbar,.nav,[data-no-swipe]';
   root.addEventListener('pointerdown',event=>{
@@ -8,8 +8,8 @@ export function installSwipeNavigation({onLeft,onRight,canStart=()=>true,root=do
     if(!event.isPrimary || event.pointerType!=='touch' || !canStart() || event.target.closest(blocked))return;
     if(event.clientX<18 || event.clientX>innerWidth-18)return;
     start={id:event.pointerId,x:event.clientX,y:event.clientY,at:performance.now()};
-  },{passive:true});
-  root.addEventListener('pointercancel',()=>{start=null;},{passive:true});
+  },{passive:true,signal});
+  root.addEventListener('pointercancel',()=>{start=null;},{passive:true,signal});
   root.addEventListener('pointerup',event=>{
     const initial=start;start=null;
     if(!initial || event.pointerId!==initial.id || !canStart())return;
@@ -17,11 +17,11 @@ export function installSwipeNavigation({onLeft,onRight,canStart=()=>true,root=do
     if(Math.abs(dx)<62 || Math.abs(dx)<Math.abs(dy)*1.6 || performance.now()-initial.at>700)return;
     const handled=dx<0?onLeft?.():onRight?.();
     if(handled!==false && handled!==undefined)swipedAt=performance.now();
-  },{passive:true});
+  },{passive:true,signal});
   root.addEventListener('click',event=>{
     if(performance.now()-swipedAt>350 || !(event.pointerType==='touch'||event.sourceCapabilities?.firesTouchEvents))return;
     swipedAt=-Infinity;event.preventDefault();event.stopImmediatePropagation();
-  },true);
+  },{capture:true,signal});
 }
 
 export function confirmDiscardChanges(onDiscard,{onStay=()=>{}}={}) {

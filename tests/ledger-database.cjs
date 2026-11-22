@@ -1,0 +1,35 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const {PGlite}=require(process.env.SALDO_PGLITE_MODULE||'@electric-sql/pglite');
+const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222',card='33333333-3333-4333-8333-333333333333',sub='44444444-4444-4444-8444-444444444444';
+async function database(){const db=new PGlite();await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key,email text);create function auth.uid() returns uuid language sql stable as 'select nullif(current_setting(''request.jwt.claim.sub'',true),'''')::uuid';grant usage on schema auth to authenticated,service_role;grant execute on function auth.uid() to authenticated,service_role;insert into auth.users values ('${A}','a@example.test'),('${B}','b@example.test');`);
+ for(const f of ['202611080001_initial.sql','20261118165814_subscription_renewal_and_notifications.sql','20261119164717_archived_record_delete.sql','20261119164727_unified_account_and_terms.sql'])await db.exec(fs.readFileSync('supabase/migrations/'+f,'utf8'));
+ await db.exec(`insert into saldo_cards(id,user_id,name,balance_cents,note) values ('${card}','${A}','旧卡',38000,'原备注');insert into saldo_subscriptions(id,user_id,name,cycle_months,fee_cents,reminder_days) values ('${sub}','${A}','旧订阅',24,48000,array[30,7,1]);`);
+ const before=(await db.query('select row_to_json(c) as row from saldo_cards c')).rows;await db.exec(fs.readFileSync('supabase/migrations/20261122061007_ledger_entitlements_and_events.sql','utf8'));
+ const after=(await db.query('select to_jsonb(c)-\'entitlements\' as row from saldo_cards c')).rows;assert.deepEqual(after,before);
+ return db;}
+module.exports={database,A,B,card,sub};
+if(require.main===module)(async()=>{const db=await database();try{
+const role=async id=>db.exec(`reset role;set role authenticated;select set_config('request.jwt.claim.sub','${id}',false)`);await role(A);
+const write=async(action,kind,id,version,payload={})=>(await db.query('select saldo_ledger_write($1,$2,$3,$4,$5) as result',[action,kind,id,version,JSON.stringify(payload)])).rows[0].result;
+const date=new Date().toISOString().slice(0,10);const uuid=()=>crypto.randomUUID();
+await assert.rejects(write('edit','stored',card,99,{record:{name:'错误'}}),/STALE_RECORD/);
+const id=uuid(),ent=uuid();const r={name:'SPA 10次',note:'',expires:'',entitlements:[{id:ent,kind:'quantity',name:'护理',unit:'次',remaining:1000,acquired:1000}]};
+await write('create','stored',id,null,{record:r,paid:200000,date,eventId:uuid(),summary:'购买 10 次'});
+let row=(await db.query('select * from saldo_cards where id=$1',[id])).rows[0];assert.equal(row.balance_cents,null);assert.equal(row.entitlements[0].remaining,1000);await assert.rejects(db.query('update saldo_cards set balance_cents=100 where id=$1',[id]),/REFRESH_REQUIRED/);
+const ev=uuid();await write('use','stored',id,1,{values:{[ent]:100},date,eventId:ev,summary:'10 → 9 次'});row=(await db.query('select * from saldo_cards where id=$1',[id])).rows[0];assert.equal(row.entitlements[0].remaining,900);
+assert.equal((await db.query('select payload from saldo_ledger_events where id=$1',[ev])).rows[0].payload.paid,null);
+await assert.rejects(write('use','stored',id,2,{values:{[ent]:99999},date,eventId:uuid()}),/INVALID_AMOUNT/);assert.equal((await db.query('select version from saldo_cards where id=$1',[id])).rows[0].version,2);
+await write('undo','stored',id,2,{eventId:ev});assert.equal((await db.query('select entitlements from saldo_cards where id=$1',[id])).rows[0].entitlements[0].remaining,1000);
+await assert.rejects(write('undo','stored',id,3,{eventId:ev}),/CANNOT_UNDO/);
+await write('edit','stored',card,1,{record:{name:'旧卡',note:'原备注',expires:''}});assert.equal((await db.query('select entitlements from saldo_cards where id=$1',[card])).rows[0].entitlements,null);
+await write('adjust','stored',card,2,{values:{[card]:35000},date,eventId:uuid(),summary:'余额 380 → 350'});
+await write('topup','stored',card,3,{values:{[card]:10000},paid:10000,date,eventId:uuid(),summary:'充值 100'});assert.equal((await db.query('select balance_cents from saldo_cards where id=$1',[card])).rows[0].balance_cents,45000);
+await assert.rejects(write('topup','stored',card,4,{values:{[card]:100},paid:-1,date,eventId:uuid()}),/INVALID_PAYMENT/);assert.equal((await db.query('select version from saldo_cards where id=$1',[card])).rows[0].version,4);
+await write('edit','subscription',sub,1,{record:{name:'旧订阅',note:'保留',expires:'',fee:48000,cycle:null,legacyCycle:'两年及以上',autoRenew:null,reminderDays:[30,7,1]}});row=(await db.query('select * from saldo_subscriptions where id=$1',[sub])).rows[0];assert.equal(row.cycle_months,24);assert.deepEqual(row.cycle_exact,{});assert.equal(row.auto_renew,null);
+const sid=uuid();await write('create','subscription',sid,null,{record:{name:'按周订阅',note:'',expires:'2026-12-01',fee:5000,cycle:{unit:'week',value:2},autoRenew:null,reminderDays:[]},paid:4000,date,eventId:uuid()});assert.deepEqual((await db.query('select reminder_days from saldo_subscriptions where id=$1',[sid])).rows[0].reminder_days,[]);
+const renew=uuid();await write('renew','subscription',sid,1,{paid:6000,date,nextDate:'2099-01-01',eventId:renew,updateFee:true,cycleAnchor:1});assert.equal((await db.query('select fee_cents from saldo_subscriptions where id=$1',[sid])).rows[0].fee_cents,6000);await write('undo','subscription',sid,2,{eventId:renew});row=(await db.query('select * from saldo_subscriptions where id=$1',[sid])).rows[0];assert.equal(row.fee_cents,5000);assert.equal(new Date(row.expires_on).toISOString().slice(0,10),'2026-12-01');
+await role(B);assert.equal((await db.query('select * from saldo_cards')).rows.length,0);assert.equal((await db.query('select * from saldo_ledger_events')).rows.length,0);await assert.rejects(write('use','stored',id,3,{values:{[ent]:100},date,eventId:uuid()}),/STALE_RECORD/);await assert.rejects(db.query('insert into saldo_ledger_events(id,user_id,subscription_id,occurred_on,payload) values($1,$2,$3,$4,$5)',[uuid(),B,sid,date,'{}']),/row-level security/);
+await role(A);await assert.rejects(write('delete','stored',id,3),/NOT_ARCHIVED/);await write('archive','stored',id,3);await write('restore','stored',id,4);await write('archive','stored',id,5);await write('delete','stored',id,6);assert.equal((await db.query('select * from saldo_ledger_events where card_id=$1',[id])).rows.length,0);
+await db.exec('reset role;set role anon');await assert.rejects(write('archive','stored',card,4),/permission denied/);
+console.log('PASS ledger database: additive preservation, RLS/tenant isolation, atomic create/use/topup/adjust/renew/undo, stale versions, unknown legacy cycles/costs, reminders, archive/restore/delete.');
+}finally{await db.close();}})().catch(e=>{console.error(e);process.exitCode=1});
