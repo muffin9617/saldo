@@ -4,7 +4,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 root=Path(__file__).resolve().parent
 files={'/':(root/'index.html','text/html'),'/index.html':(root/'index.html','text/html'),'/prototype.mjs':(root/'app.mjs','text/javascript'),'/model.mjs':(root/'model.mjs','text/javascript'),'/fixtures.mjs':(root/'fixtures.mjs','text/javascript'),'/prototype.css':(root/'style.css','text/css')}
-for name,mime in [('saldo.css','text/css'),('gestures.js','text/javascript'),('navigation.js','text/javascript'),('icon.svg','image/svg+xml')]:files['/'+name]=(root.parent/'dist'/name,mime)
+for name,mime in [('saldo.css','text/css'),('gestures.js','text/javascript'),('navigation.js','text/javascript'),('icon.svg','image/svg+xml'),('brand-logos.js','text/javascript'),('brand-logos.css','text/css')]:files['/'+name]=(root.parent/'dist'/name,mime)
+for asset in (root.parent/'dist'/'brand-assets').iterdir():
+    mime={'.jpg':'image/jpeg','.png':'image/png','.ico':'image/x-icon','.svg':'image/svg+xml'}[asset.suffix]
+    files['/brand-assets/'+asset.name]=(asset,mime)
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         entry=files.get(urlsplit(self.path).path)

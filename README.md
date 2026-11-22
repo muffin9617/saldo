@@ -35,3 +35,7 @@ Supabase 提供邮箱密码、Google 账号验证和个人数据存储。统一�
 发布前须应用 `20261122061007_ledger_entitlements_and_events.sql`，之后发布静态前端。该迁移只新增列、明细表及受 RLS 和版本检查约束的事务 RPC，不批量更新现有用户记录。通知及品牌邮件沿用已有配置。
 
 验收：`node tests/ledger-database.cjs`（需 PGlite）、`node tests/ledger-browser.cjs`（需 PGlite 和 Playwright）。后者以正式静态代码和真实本地 SQL 验证，不连接线上账号、不发送邮件或推送。运行依赖通过 SALDO_PGLITE_MODULE、SALDO_PLAYWRIGHT_MODULE 和 PLAYWRIGHT_BROWSERS_PATH 指定。隔离设计原型仍位于 prototype，不随 dist 公开托管。
+
+## 2026.11.22.2 品牌图标
+
+首批 19 个本地品牌素材，以原色和统一琥珀容器展示。新建／编辑即时预览，列表／详情／归档共享名称匹配；未知、未核实品牌与加载失败保留首字。Drunk Baker 待补素材，迪士尼与环球仅匹配明确上海／北京名称。匹配不修改名称、账目或数据库结构。规则与样式在 dist/brand-logos.js、brand-logos.css，素材位于 dist/brand-assets；来源见 design/brand-library/SOURCES.md。
