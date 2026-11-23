@@ -1,5 +1,6 @@
 import {loadLedger} from './ledger-store.js';
 import {mountLedger} from './ledger-app.js';
+import {prepareLedgerStyles} from './ledger-styles.js';
 let ledgerController=null;
 import { createHistoryNavigation } from './navigation.js';
 import { installSwipeNavigation, confirmDiscardChanges } from './gestures.js';
@@ -1219,13 +1220,13 @@ async function switchSession(session, { force = false, recovery = false, message
     if (revision !== sessionRevision) return;
     if (!accepted) { showTermsGate(session); return; }
     const [wallet] = await Promise.all([
-      loadLedger(client, session.user.id), loadNotificationPreferences(session.user.id),
+      loadLedger(client, session.user.id), loadNotificationPreferences(session.user.id), prepareLedgerStyles(),
     ]);
     if (revision !== sessionRevision) return;
     ledgerController=mountLedger({client,session,initial:wallet});
 
-  } catch {
-    if (revision === sessionRevision) walletStatus('暂时无法读取钱包，请稍后重试。', { retry: true });
+  } catch (error) {
+    if (revision === sessionRevision) walletStatus(error.message === 'LEDGER_STYLES_UNAVAILABLE' ? '页面样式未能加载，请检查网络后重试。' : '暂时无法读取钱包，请稍后重试。', { retry: true });
   }
 }
 

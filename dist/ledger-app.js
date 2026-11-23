@@ -1,4 +1,5 @@
 import {brandLogoMarkup,installBrandLogos} from './brand-logos.js';
+import {activateLedgerStyles,deactivateLedgerStyles} from './ledger-styles.js';
 import * as M from './ledger-model.js';
 import {saveLedger} from './ledger-store.js';
 import {appVersion,settingsRow} from './settings-ui.js';
@@ -10,9 +11,8 @@ export function mountLedger({client,session,initial}){
 const controller=new AbortController(),signal=controller.signal;
 const $=s=>document.querySelector(s), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let writing=false,disposed=false;
-let style=document.querySelector('#ledger-style');if(!style){style=document.createElement('link');style.id='ledger-style';style.rel='stylesheet';style.href='/ledger.css';document.head.append(style);}style.disabled=false;
+activateLedgerStyles();
 document.body.classList.add('ledger-active');
-let brandStyle=document.querySelector('#brand-style');if(!brandStyle){brandStyle=document.createElement('link');brandStyle.id='brand-style';brandStyle.rel='stylesheet';brandStyle.href='/brand-logos.css';document.head.append(brandStyle);}
 let state,loadError='',route={page:'总览',selected:null,type:'cards',myView:'',creating:false,modal:0},draft=null,dirty=false,modalDirty=false,period='month',query='',sort='date',filter='all';
 const tabs=[['总览','首页','home'],['储值卡','储值','card'],['订阅','订阅','calendar'],['我的','我的','user']],modalCache=new Map(),scrollPositions=new Map();
 const paths={home:'<path d="m3 10 9-7 9 7v10H3Z M9 20v-7h6v7"/>',card:'<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20M6 15h4"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 2v6M17 2v6M3 11h18"/>',user:'<circle cx="12" cy="7" r="4"/><path d="M4 22v-3a8 8 0 0 1 16 0v3"/>',plus:'<path d="M12 5v14M5 12h14"/>',back:'<path d="m14 6-6 6 6 6"/>',arrow:'<path d="M5 12h14m-5-5 5 5-5 5"/>',check:'<path d="m5 12 4 4 10-10"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'};
@@ -253,5 +253,5 @@ const params=new URLSearchParams(location.search),pages={cards:'储值卡',subsc
 if(params.get('record')&&state.records.some(r=>r.id===params.get('record')))route={...route,selected:params.get('record'),type:state.records.find(r=>r.id===params.get('record')).kind==='stored'?'cards':'subs'};
 nav.initialize(route,route.selected?base(route.page):undefined);render();
 
-return {destroy(){disposed=true;controller.abort();clearTimeout(toastTimer);document.querySelector('.toast')?.remove();$('.nav').hidden=true;document.body.classList.remove('ledger-active');style.disabled=true;$('#modal').close();$('#modal').replaceChildren();}};
+return {destroy(){disposed=true;controller.abort();clearTimeout(toastTimer);document.querySelector('.toast')?.remove();$('.nav').hidden=true;document.body.classList.remove('ledger-active');deactivateLedgerStyles();$('#modal').close();$('#modal').replaceChildren();}};
 }
